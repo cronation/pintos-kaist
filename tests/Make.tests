@@ -76,3 +76,7 @@ TESTCMD += 2> $(TEST).errors $(if $(VERBOSE),|tee,>) $(TEST).output
 
 %.result: %.ck %.output
 	perl -I$(SRCDIR) $< $* $@
+
+%.try:
+	rm $(@D)/$(*F).result
+	make $(@D)/$(*F).result VERBOSE=1
