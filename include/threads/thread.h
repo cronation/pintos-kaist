@@ -92,12 +92,13 @@ struct thread {
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
 	// P1-PS
+	int ori_priority; // donate받기 전의 기존 priority
 	// 쓰레드가 hold중인 lock의 리스트
-	// donate받을 priority를 업데이트하는데 사용됨
+	// donor를 확인하는데 사용됨
 	struct list lock_list;
 	// 쓰레드가 acquire 대기중인 lock의 holder
-	// 현재 쓰레드의 priority를 donation받음
-	// struct thread *acceptor;
+	// 현재 쓰레드의 priority를 donate받음
+	struct thread *donee_t;
 	int64_t wake_tick; // 깨어날 시각 (P1-AC)
 
 	/* Shared between thread.c and synch.c. */ // AND alarm clock (P1-AC)
@@ -122,8 +123,20 @@ struct thread {
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 
+// P1-PS
+bool thread_wake_tick_less(const struct list_elem *a,
+	const struct list_elem *b, void *aux);
+bool thread_priority_great(const struct list_elem *a,
+	const struct list_elem *b, void *aux);
+bool lock_priority_great(const struct list_elem *a,
+	const struct list_elem *b, void *aux);
+
 void thread_init (void);
 void thread_start (void);
+
+// P1-AC
+void thread_sleep_until(int64_t wake_tick);
+int64_t thread_wake_sleepers(int64_t cur_tick);
 
 void thread_tick (void);
 void thread_print_stats (void);
@@ -150,7 +163,5 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
-
-struct thread *thread_highest_in_list (struct list *thread_list); // P1-PS
 
 #endif /* threads/thread.h */

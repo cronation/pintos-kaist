@@ -412,6 +412,28 @@ list_sort (struct list *list, list_less_func *less, void *aux) {
 	ASSERT (is_sorted (list_begin (list), list_end (list), less, aux));
 }
 
+// P1-PS
+// elem이 속한 리스트가 자신만 빼고 모두 정렬되어 있을 때 자신을 올바른 위치로 이동
+void list_sort_elem(struct list_elem *elem, list_less_func *less, void *aux) {
+	ASSERT(is_interior(elem));
+
+	struct list_elem *head, *iter_e = elem;
+
+	// head 찾기
+	while (!is_head(iter_e)) {
+		iter_e = list_prev(iter_e);
+	}
+	head = iter_e;
+
+	list_remove(elem);
+	for (iter_e = list_next(head); !is_tail(iter_e); iter_e = list_next(iter_e)) {
+		if (less(elem, iter_e, aux))
+			break;
+	}
+
+	list_insert(iter_e, elem);
+}
+
 /* Inserts ELEM in the proper position in LIST, which must be
    sorted according to LESS given auxiliary data AUX.
    Runs in O(n) average case in the number of elements in LIST. */

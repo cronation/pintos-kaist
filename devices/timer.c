@@ -19,6 +19,7 @@
 
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
+static int64_t next_wake_tick; // 다음으로 쓰레드를 깨울 시각 (P1-AC)
 
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
@@ -43,6 +44,8 @@ timer_init (void) {
 	outb (0x40, count >> 8);
 
 	intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+
+	next_wake_tick = __INT64_MAX__; // P1-AC
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -87,11 +90,15 @@ timer_elapsed (int64_t then) {
 	return timer_ticks () - then;
 }
 
-/* Suspends execution for approximately TICKS timer ticks. */
 // P1-AC
+// ticks 시간동안 정지
 void
 timer_sleep (int64_t ticks) {
-	thread_sleep_until(timer_ticks() + ticks);
+	int64_t wake_tick = timer_ticks() + ticks;
+	if (wake_tick < next_wake_tick) {
+		next_wake_tick = wake_tick;
+	}
+	thread_sleep_until(wake_tick);
 }
 
 /* Suspends execution for approximately TICKS timer ticks. */
@@ -133,7 +140,11 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 
-	thread_wake_sleepers(ticks); // P1-AC
+	// P1-AC
+	// 쓰레드를 깨우고 다음으로 깨울 시각을 저장
+	if (ticks >= next_wake_tick) {
+		next_wake_tick = thread_wake_sleepers(ticks);
+	}
 	thread_tick ();
 }
 
