@@ -145,6 +145,10 @@ timer_interrupt (struct intr_frame *args UNUSED) {
 	if (ticks >= next_wake_tick) {
 		next_wake_tick = thread_wake_sleepers(ticks);
 	}
+	if (ticks % TIMER_FREQ == 0) {
+		// 1초에 한 번 호출 (P1-AS)
+		thread_sec();
+	}
 	thread_tick ();
 }
 

@@ -91,6 +91,10 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
+	// P1-AS
+	int nice;
+	int recent_cpu; // in 17.14 format
+
 	// P1-PS
 	int ori_priority; // donate받기 전의 기존 priority
 	// 쓰레드가 hold중인 lock의 리스트
@@ -99,10 +103,13 @@ struct thread {
 	// 쓰레드가 acquire 대기중인 lock의 holder
 	// 현재 쓰레드의 priority를 donate받음
 	struct thread *donee_t;
+
 	int64_t wake_tick; // 깨어날 시각 (P1-AC)
+
 
 	/* Shared between thread.c and synch.c. */ // AND alarm clock (P1-AC)
 	struct list_elem elem;              /* List element. */
+	struct list_elem elem_2; // 전역변수 all_list에 사용되는 elem (P1-AS)
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -128,6 +135,8 @@ bool thread_wake_tick_less(const struct list_elem *a,
 	const struct list_elem *b, void *aux);
 bool thread_priority_great(const struct list_elem *a,
 	const struct list_elem *b, void *aux);
+bool thread_priority_less(const struct list_elem *a,
+	const struct list_elem *b, void *aux); // P1-AS
 bool lock_priority_great(const struct list_elem *a,
 	const struct list_elem *b, void *aux);
 
@@ -139,6 +148,7 @@ void thread_sleep_until(int64_t wake_tick);
 int64_t thread_wake_sleepers(int64_t cur_tick);
 
 void thread_tick (void);
+void thread_sec(void); // P1-AS
 void thread_print_stats (void);
 
 typedef void thread_func (void *aux);
@@ -156,6 +166,8 @@ void thread_yield (void);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
+void thread_donate_priority(struct thread *donor, struct thread *donee); // P1-PS
+void thread_recalculate_donate(struct thread *t); // P1-PS
 
 int thread_get_nice (void);
 void thread_set_nice (int);
