@@ -100,7 +100,7 @@ struct thread {
 	int recent_cpu; // in 17.14 format
 	// P1-PS
 	int ori_priority; // donate받기 전의 기존 priority
-	struct list lock_list; // 쓰레드가 hold중인 lock의 리스트: donor 확인
+	struct list lock_list; // 쓰레드가 hold중인 lock의 리스트: donor 확인용
 	struct thread *donee_t; // 쓰레드가 acquire 대기중인 lock의 holder
 	// P1-AC
 	int64_t wake_tick; // 깨어날 시각
@@ -128,22 +128,8 @@ struct thread {
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 
-// P1-PS
-bool thread_wake_tick_less(const struct list_elem *a,
-	const struct list_elem *b, void *aux);
-bool thread_priority_great(const struct list_elem *a,
-	const struct list_elem *b, void *aux);
-bool thread_priority_less(const struct list_elem *a,
-	const struct list_elem *b, void *aux); // P1-AS
-bool lock_priority_great(const struct list_elem *a,
-	const struct list_elem *b, void *aux);
-
 void thread_init (void);
 void thread_start (void);
-
-// P1-AC
-void thread_sleep_until(int64_t wake_tick);
-int64_t thread_wake_sleepers(int64_t cur_tick);
 
 void thread_tick (void);
 void thread_sec(void); // P1-AS
@@ -155,6 +141,10 @@ tid_t thread_create (const char *name, int priority, thread_func *, void *);
 void thread_block (void);
 void thread_unblock (struct thread *);
 
+// P1-AC
+void thread_sleep_until(int64_t wake_tick);
+int64_t thread_wake_sleepers(int64_t cur_tick);
+
 struct thread *thread_current (void);
 tid_t thread_tid (void);
 const char *thread_name (void);
@@ -162,15 +152,20 @@ const char *thread_name (void);
 void thread_exit (void) NO_RETURN;
 void thread_yield (void);
 
-int thread_get_priority (void);
 void thread_set_priority (int);
+int thread_get_priority (void);
 void thread_donate_priority(struct thread *donor, struct thread *donee); // P1-PS
 void thread_recalculate_donate(struct thread *t); // P1-PS
 
-int thread_get_nice (void);
-void thread_set_nice (int);
-int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+int thread_get_recent_cpu (void);
+void thread_set_nice (int);
+int thread_get_nice (void);
+
+bool thread_wake_tick_less(const struct list_elem *a,
+	const struct list_elem *b, void *aux); // P1-AC
+bool thread_priority_less(const struct list_elem *a,
+	const struct list_elem *b, void *aux); // P1-AS
 
 void do_iret (struct intr_frame *tf);
 

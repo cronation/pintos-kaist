@@ -90,6 +90,7 @@ timer_elapsed (int64_t then) {
 	return timer_ticks () - then;
 }
 
+/* Suspends execution for approximately TICKS timer ticks. */
 // P1-AC
 // ticks 시간동안 정지
 void
@@ -100,16 +101,6 @@ timer_sleep (int64_t ticks) {
 	}
 	thread_sleep_until(wake_tick);
 }
-
-/* Suspends execution for approximately TICKS timer ticks. */
-// void
-// timer_sleep (int64_t ticks) {
-// 	int64_t start = timer_ticks ();
-
-// 	ASSERT (intr_get_level () == INTR_ON);
-// 	while (timer_elapsed (start) < ticks)
-// 		thread_yield ();
-// }
 
 /* Suspends execution for approximately MS milliseconds. */
 void
@@ -143,7 +134,7 @@ timer_interrupt (struct intr_frame *args UNUSED) {
 	if (ticks >= next_wake_tick) // P1-AC
 		next_wake_tick = thread_wake_sleepers(ticks);
 	if (ticks % TIMER_FREQ == 0) // P1-AS
-		thread_sec();
+		thread_sec(); // load_avg, recent_cpu 업데이트
 	thread_tick ();
 }
 

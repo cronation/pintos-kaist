@@ -41,9 +41,13 @@ test_mlfqs_block (void)
     continue;
 
   msg ("Main thread releasing lock.");
+  // msg ("Main thread releasing lock (cur_tick = %lld, pri = %d).", timer_ticks(), thread_current()->priority);
   lock_release (&lock);
 
   msg ("Block thread should have already acquired lock.");
+  // msg ("Block thread should have already acquired lock (cur_tick = %lld, pri = %d).", timer_ticks(), thread_current()->priority);
+
+  // PRINT_ME(); ///////////////
 }
 
 static void
@@ -58,7 +62,9 @@ block_thread (void *lock_)
     continue;
 
   msg ("Block thread acquiring lock...");
+  // msg ("Block thread acquiring lock... (pri = %d)", thread_current()->priority);
   lock_acquire (lock);
 
   msg ("...got it.");
+  // msg ("...got it (cur_tick = %lld, pri = %d).", timer_ticks(), thread_current()->priority);
 }
