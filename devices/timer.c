@@ -140,15 +140,10 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 
-	// P1-AC
-	// 쓰레드를 깨우고 다음으로 깨울 시각을 저장
-	if (ticks >= next_wake_tick) {
+	if (ticks >= next_wake_tick) // P1-AC
 		next_wake_tick = thread_wake_sleepers(ticks);
-	}
-	if (ticks % TIMER_FREQ == 0) {
-		// 1초에 한 번 호출 (P1-AS)
+	if (ticks % TIMER_FREQ == 0) // P1-AS
 		thread_sec();
-	}
 	thread_tick ();
 }
 

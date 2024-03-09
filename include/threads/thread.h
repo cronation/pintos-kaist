@@ -28,6 +28,10 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+// P1-AS
+#define NICE_MIN -20
+#define NICE_MAX 20
+
 /* A kernel thread or user process.
  *
  * Each thread structure is stored in its own 4 kB page.  The
@@ -94,18 +98,12 @@ struct thread {
 	// P1-AS
 	int nice;
 	int recent_cpu; // in 17.14 format
-
 	// P1-PS
 	int ori_priority; // donate받기 전의 기존 priority
-	// 쓰레드가 hold중인 lock의 리스트
-	// donor를 확인하는데 사용됨
-	struct list lock_list;
-	// 쓰레드가 acquire 대기중인 lock의 holder
-	// 현재 쓰레드의 priority를 donate받음
-	struct thread *donee_t;
-
-	int64_t wake_tick; // 깨어날 시각 (P1-AC)
-
+	struct list lock_list; // 쓰레드가 hold중인 lock의 리스트: donor 확인
+	struct thread *donee_t; // 쓰레드가 acquire 대기중인 lock의 holder
+	// P1-AC
+	int64_t wake_tick; // 깨어날 시각
 
 	/* Shared between thread.c and synch.c. */ // AND alarm clock (P1-AC)
 	struct list_elem elem;              /* List element. */

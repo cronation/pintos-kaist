@@ -15,12 +15,6 @@
 #include "userprog/process.h"
 #endif
 
-// DEBUG
-int g_idx = 0;
-int g_ticks[100];
-int g_pri[100];
-int g_tid[100];
-
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
@@ -31,14 +25,12 @@ int g_tid[100];
 #define THREAD_BASIC 0xd42df210
 
 // P1-AS
+// 고정 소수점 계산
 #define FRAC (1 << 14)
-// from int to 17.14 format
-#define TO_REAL(x) ((x) * FRAC)
-// from 17.14 format to int
-#define TO_INT(x) ( (x) > 0 ? (((x) + FRAC/2) / FRAC) : (((x) - FRAC/2) / FRAC) )
-
-#define NICE_MIN -20
-#define NICE_MAX 20
+#define TO_REAL(x) ((x) * FRAC)					// from int to 17.14 format
+#define TO_INT(x) ( (x) > 0 ? \
+					(((x) + FRAC/2) / FRAC) : \
+					(((x) - FRAC/2) / FRAC) ) 	// from 17.14 format to int
 
 static int load_avg; // in 17.14 format
 
@@ -59,8 +51,6 @@ static struct lock tid_lock;
 
 /* Thread destruction requests */
 static struct list destruction_req;
-
-// #define PRI_MAX_DEPTH 8 // prioriy donation 최대 재귀 깊이 (P1-PS)
 
 /* Statistics. */
 static long long idle_ticks;    /* # of timer ticks spent idle. */
@@ -102,145 +92,145 @@ static tid_t allocate_tid (void);
 static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
 
 // DEBUG
-void PRINT_ME() {
-	printf("[DBG] printing history\n");
-	for (int i = 0; i < 50; i++) {
-		printf("tick = %lld, tid = %d, pri = %d\n", g_ticks[i], g_tid[i], g_pri[i]);
-	}
-}
+// void PRINT_ME() {
+// 	printf("[DBG] printing history\n");
+// 	for (int i = 0; i < 50; i++) {
+// 		printf("tick = %lld, tid = %d, pri = %d\n", g_ticks[i], g_tid[i], g_pri[i]);
+// 	}
+// }
 
 // TEST FOR DEBUG ========================================================================
-void TEST() {
-	// TEST1();
-	// TEST2();
-}
+// void TEST() {
+// 	// TEST1();
+// 	// TEST2();
+// }
 
-struct testruct {
-	int val;
-	struct list_elem elem;
-};
+// struct testruct {
+// 	int val;
+// 	struct list_elem elem;
+// };
 
-bool testruct_less(struct list_elem *a, struct list_elem *b, void *aux) {
-	struct testruct *ta = list_entry(a, struct testruct, elem);
-	struct testruct *tb = list_entry(b, struct testruct, elem);
+// bool testruct_less(struct list_elem *a, struct list_elem *b, void *aux) {
+// 	struct testruct *ta = list_entry(a, struct testruct, elem);
+// 	struct testruct *tb = list_entry(b, struct testruct, elem);
 
-	return ta->val < tb->val;
-}
+// 	return ta->val < tb->val;
+// }
 
-void dummy() {
-	int old_pri = thread_current()->priority;
-	int new_pri = 40-old_pri;
-	printf("[DBG] thread %s: lowering my priority from %d to %d\n", thread_current()->name, old_pri, new_pri);
-	thread_set_priority(new_pri);
-	for (;;) {
-		printf("[DBG] thread %s: why am i printing? i go sleep...\n", thread_current()->name);
-		thread_sleep_until(99999999999);
-	}
-}
+// void dummy() {
+// 	int old_pri = thread_current()->priority;
+// 	int new_pri = 40-old_pri;
+// 	printf("[DBG] thread %s: lowering my priority from %d to %d\n", thread_current()->name, old_pri, new_pri);
+// 	thread_set_priority(new_pri);
+// 	for (;;) {
+// 		printf("[DBG] thread %s: why am i printing? i go sleep...\n", thread_current()->name);
+// 		thread_sleep_until(99999999999);
+// 	}
+// }
 
-void TEST2() {
-	// block, unblock시 
-	enum intr_level old_level = intr_disable();
-	printf("================================= TEST =================================\n");
+// void TEST2() {
+// 	// block, unblock시 
+// 	enum intr_level old_level = intr_disable();
+// 	printf("================================= TEST =================================\n");
 
-	struct thread *ta = thread_create("ta", 22, dummy, NULL);
-	struct thread *tb = thread_create("tb", 24, dummy, NULL);
-	struct thread *tc = thread_create("tc", 25, dummy, NULL);
-	struct thread *td = thread_create("td", 23, dummy, NULL);
+// 	struct thread *ta = thread_create("ta", 22, dummy, NULL);
+// 	struct thread *tb = thread_create("tb", 24, dummy, NULL);
+// 	struct thread *tc = thread_create("tc", 25, dummy, NULL);
+// 	struct thread *td = thread_create("td", 23, dummy, NULL);
 
-	print_ready();
+// 	print_ready();
 
-	printf("[DBG] thread %s: lowering my priority from %d to %d\n", thread_current()->name, 31, 21);
-	thread_set_priority(21);
+// 	printf("[DBG] thread %s: lowering my priority from %d to %d\n", thread_current()->name, 31, 21);
+// 	thread_set_priority(21);
 
-	print_ready();
+// 	print_ready();
 
-	printf("========================================================================\n");
-	intr_set_level(old_level);
-}
+// 	printf("========================================================================\n");
+// 	intr_set_level(old_level);
+// }
 
-void TEST1() {
-	// list_insert_ordered 동작 테스트
-	enum intr_level old_level = intr_disable();
-	printf("================================= TEST =================================\n");
+// void TEST1() {
+// 	// list_insert_ordered 동작 테스트
+// 	enum intr_level old_level = intr_disable();
+// 	printf("================================= TEST =================================\n");
 
-	struct list l;
-	list_init(&l);
+// 	struct list l;
+// 	list_init(&l);
 
-	struct testruct a1; a1.val = 1;
-	struct testruct a2; a2.val = 2;
-	struct testruct a3; a3.val = 3;
-	struct testruct a4; a4.val = 4;
-	struct testruct a5; a5.val = 5;
-	struct testruct a6; a6.val = 6;
+// 	struct testruct a1; a1.val = 1;
+// 	struct testruct a2; a2.val = 2;
+// 	struct testruct a3; a3.val = 3;
+// 	struct testruct a4; a4.val = 4;
+// 	struct testruct a5; a5.val = 5;
+// 	struct testruct a6; a6.val = 6;
 	
-	// list_push_back(&l,&a1.elem);
-	// list_push_back(&l,&a2.elem);
-	// list_push_back(&l,&a3.elem);
-	// list_push_back(&l,&a4.elem);
-	// list_push_back(&l,&a5.elem);
-	// list_push_back(&l,&a6.elem);
+// 	// list_push_back(&l,&a1.elem);
+// 	// list_push_back(&l,&a2.elem);
+// 	// list_push_back(&l,&a3.elem);
+// 	// list_push_back(&l,&a4.elem);
+// 	// list_push_back(&l,&a5.elem);
+// 	// list_push_back(&l,&a6.elem);
 
-	list_insert_ordered(&l, &a1.elem, testruct_less, NULL);
-	list_insert_ordered(&l, &a3.elem, testruct_less, NULL);
-	list_insert_ordered(&l, &a2.elem, testruct_less, NULL);
-	list_insert_ordered(&l, &a4.elem, testruct_less, NULL);
-	list_insert_ordered(&l, &a6.elem, testruct_less, NULL);
-	list_insert_ordered(&l, &a5.elem, testruct_less, NULL);
+// 	list_insert_ordered(&l, &a1.elem, testruct_less, NULL);
+// 	list_insert_ordered(&l, &a3.elem, testruct_less, NULL);
+// 	list_insert_ordered(&l, &a2.elem, testruct_less, NULL);
+// 	list_insert_ordered(&l, &a4.elem, testruct_less, NULL);
+// 	list_insert_ordered(&l, &a6.elem, testruct_less, NULL);
+// 	list_insert_ordered(&l, &a5.elem, testruct_less, NULL);
 
-	int idx;
-	struct testruct *a;
+// 	int idx;
+// 	struct testruct *a;
 
-	printf("printing all list elements...\n");
-	idx = 0;
-	for (struct list_elem *e = list_begin(&l); e != list_end(&l); e = list_next(e)) {
-		idx++;
-		a = list_entry(e, struct testruct, elem);
-		printf("#%d: val = %d\n", idx, a->val);
-	}
+// 	printf("printing all list elements...\n");
+// 	idx = 0;
+// 	for (struct list_elem *e = list_begin(&l); e != list_end(&l); e = list_next(e)) {
+// 		idx++;
+// 		a = list_entry(e, struct testruct, elem);
+// 		printf("#%d: val = %d\n", idx, a->val);
+// 	}
 
-	printf("increasing value of a3 to 10\n");
-	a3.val = 10;
+// 	printf("increasing value of a3 to 10\n");
+// 	a3.val = 10;
 
-	list_sort_elem(&a3.elem, testruct_less, NULL);
+// 	list_sort_elem(&a3.elem, testruct_less, NULL);
 
-	printf("printing all list elements...\n");
-	idx = 0;
-	for (struct list_elem *e = list_begin(&l); e != list_end(&l); e = list_next(e)) {
-		idx++;
-		a = list_entry(e, struct testruct, elem);
-		printf("#%d: val = %d\n", idx, a->val);
-	}
+// 	printf("printing all list elements...\n");
+// 	idx = 0;
+// 	for (struct list_elem *e = list_begin(&l); e != list_end(&l); e = list_next(e)) {
+// 		idx++;
+// 		a = list_entry(e, struct testruct, elem);
+// 		printf("#%d: val = %d\n", idx, a->val);
+// 	}
 
-	printf("decreasing value of a1 to -10\n");
-	a1.val = -10;
+// 	printf("decreasing value of a1 to -10\n");
+// 	a1.val = -10;
 
-	list_sort_elem(&a1.elem, testruct_less, NULL);
+// 	list_sort_elem(&a1.elem, testruct_less, NULL);
 
-	printf("printing all list elements...\n");
-	idx = 0;
-	for (struct list_elem *e = list_begin(&l); e != list_end(&l); e = list_next(e)) {
-		idx++;
-		a = list_entry(e, struct testruct, elem);
-		printf("#%d: val = %d\n", idx, a->val);
-	}
+// 	printf("printing all list elements...\n");
+// 	idx = 0;
+// 	for (struct list_elem *e = list_begin(&l); e != list_end(&l); e = list_next(e)) {
+// 		idx++;
+// 		a = list_entry(e, struct testruct, elem);
+// 		printf("#%d: val = %d\n", idx, a->val);
+// 	}
 
-	printf("increasing value of a3 to 15\n");
-	a3.val = 15;
+// 	printf("increasing value of a3 to 15\n");
+// 	a3.val = 15;
 
-	list_sort_elem(&a3.elem, testruct_less, NULL);
+// 	list_sort_elem(&a3.elem, testruct_less, NULL);
 
-	printf("printing all list elements...\n");
-	idx = 0;
-	for (struct list_elem *e = list_begin(&l); e != list_end(&l); e = list_next(e)) {
-		idx++;
-		a = list_entry(e, struct testruct, elem);
-		printf("#%d: val = %d\n", idx, a->val);
-	}
+// 	printf("printing all list elements...\n");
+// 	idx = 0;
+// 	for (struct list_elem *e = list_begin(&l); e != list_end(&l); e = list_next(e)) {
+// 		idx++;
+// 		a = list_entry(e, struct testruct, elem);
+// 		printf("#%d: val = %d\n", idx, a->val);
+// 	}
 
-	printf("========================================================================\n");
-	intr_set_level(old_level);
-}
+// 	printf("========================================================================\n");
+// 	intr_set_level(old_level);
+// }
 
 // =========================================================================================
 
@@ -287,14 +277,14 @@ bool lock_priority_great(const struct list_elem *a,
 		return 1;
 	} else {
 		struct thread *ta = list_entry(list_begin(&la->semaphore.waiters),
-										struct thread, elem);
+									   struct thread, elem);
 		struct thread *tb = list_entry(list_begin(&lb->semaphore.waiters),
-										struct thread, elem);
+									   struct thread, elem);
 		return ta->priority > tb->priority;
 	}
 }
 
-int clamp_priority(int priority) {
+static int clamp_priority(int priority) {
 	if (priority < PRI_MIN)
 		priority = PRI_MIN;
 	else if (priority > PRI_MAX)
@@ -303,53 +293,53 @@ int clamp_priority(int priority) {
 }
 
 // DEBUG (P1-AC)
-void print_sleepers(int64_t cur_tick) {
-	enum intr_level old_level = intr_disable ();
+// void print_sleepers(int64_t cur_tick) {
+// 	enum intr_level old_level = intr_disable ();
 
-	struct list_elem *e;
-	struct thread *t;
+// 	struct list_elem *e;
+// 	struct thread *t;
 
-	printf("[DEBUG] PRINTING ALL SLEEPERS (cur tick=%lld)\n", cur_tick);
-	for (e = list_begin(&sleep_list); e != list_end(&sleep_list); e = e->next) {
-		t = list_entry(e, struct thread, elem);
-		printf("thread#%d at %p, wake_tick=%lld\n", t->tid, e, t->wake_tick);
-	}
-	printf("tail at %p\n", list_end(&sleep_list));
-	intr_set_level (old_level);
-}
+// 	printf("[DEBUG] PRINTING ALL SLEEPERS (cur tick=%lld)\n", cur_tick);
+// 	for (e = list_begin(&sleep_list); e != list_end(&sleep_list); e = e->next) {
+// 		t = list_entry(e, struct thread, elem);
+// 		printf("thread#%d at %p, wake_tick=%lld\n", t->tid, e, t->wake_tick);
+// 	}
+// 	printf("tail at %p\n", list_end(&sleep_list));
+// 	intr_set_level (old_level);
+// }
 
 // DEBUG (P1-PS)
-void print_ready() {
-	enum intr_level old_level = intr_disable ();
+// void print_ready() {
+// 	enum intr_level old_level = intr_disable ();
 
-	struct list_elem *e;
-	struct thread *t;
+// 	struct list_elem *e;
+// 	struct thread *t;
 
-	printf("[DEBUG] PRINTING ALL READY THREADS\n");
-	for (e = list_begin(&ready_list); e != list_end(&ready_list); e = e->next) {
-		t = list_entry(e, struct thread, elem);
-		printf("thread#%d (%s) at %p, priority=%d\n", t->tid, t->name, e, t->priority);
-		// printf("thread#%d (%s) at %p\n", t->tid, t->name, e);
-	}
-	printf("tail at %p\n", list_end(&ready_list));
-	intr_set_level (old_level);
-}
+// 	printf("[DEBUG] PRINTING ALL READY THREADS\n");
+// 	for (e = list_begin(&ready_list); e != list_end(&ready_list); e = e->next) {
+// 		t = list_entry(e, struct thread, elem);
+// 		printf("thread#%d (%s) at %p, priority=%d\n", t->tid, t->name, e, t->priority);
+// 		// printf("thread#%d (%s) at %p\n", t->tid, t->name, e);
+// 	}
+// 	printf("tail at %p\n", list_end(&ready_list));
+// 	intr_set_level (old_level);
+// }
 
 // DEBUG (P1-AS)
-void print_all_list(void) {
-	enum intr_level old_level = intr_disable ();
+// void print_all_list(void) {
+// 	enum intr_level old_level = intr_disable ();
 
-	struct list_elem *e;
-	struct thread *t;
+// 	struct list_elem *e;
+// 	struct thread *t;
 
-	printf("[DEBUG] PRINTING ALL THREADS\n");
-	for (e = list_begin(&all_list); e != list_end(&all_list); e = e->next) {
-		t = list_entry(e, struct thread, elem_2);
-		printf("thread#%d {%s} at %p\n", t->tid, t->name, e);
-	}
-	printf("tail at %p\n", list_end(&all_list));
-	intr_set_level (old_level);
-}
+// 	printf("[DEBUG] PRINTING ALL THREADS\n");
+// 	for (e = list_begin(&all_list); e != list_end(&all_list); e = e->next) {
+// 		t = list_entry(e, struct thread, elem_2);
+// 		printf("thread#%d {%s} at %p\n", t->tid, t->name, e);
+// 	}
+// 	printf("tail at %p\n", list_end(&all_list));
+// 	intr_set_level (old_level);
+// }
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -390,9 +380,10 @@ thread_init (void) {
 
 	list_init(&sleep_list); // P1-AC
 	if (thread_mlfqs) { // P1-AS
-		initial_thread->nice = 0; // 초기 쓰레드 nice는 0
 		list_init(&all_list);
+		// main 쓰레드 설정
 		list_push_back(&all_list, &initial_thread->elem_2);
+		initial_thread->nice = 0;
 	}
 }
 
@@ -404,8 +395,7 @@ void thread_sleep_until(int64_t wake_tick) {
 
 	enum intr_level old_level = intr_disable ();
 
-	// 현재 쓰레드를 sleep_list에 삽입
-	// wake_tick에 대해 오름차순으로 정렬
+	// 현재 쓰레드를 wake_tick 오름차순으로 sleep_list에 삽입
 	list_insert_ordered(&sleep_list, &t->elem, thread_wake_tick_less, NULL);
 	thread_block();
 
@@ -424,15 +414,16 @@ int64_t thread_wake_sleepers(int64_t cur_tick) {
 	struct list_elem *e;
 	struct thread *t;
 
-	for (e = list_begin(&sleep_list); e != list_end(&sleep_list); e = e->next) {
+	for (e = list_begin(&sleep_list);
+		 e != list_end(&sleep_list); e = list_next(e)) {
 		t = list_entry(e, struct thread, elem);
-		// sleep_list는 wake_tick 오름차순, priority 내림차순으로 정렬되어있음
+		// sleep_list는 wake_tick 오름차순으로 정렬되어있음
 		if (cur_tick >= t->wake_tick) {
 			// 깨어날 시각이 지났으면 깨우기
 			e = list_remove(e);
 			e = e->prev; // thread_unblock을 하면 t의 next/prev가 바뀌므로 미리 조정
 			// printf("[DBG] thread_wake_sleepers(): wake {%s} (wake_tick = %lld, cur_tick = %lld)\n", t->name, t->wake_tick, cur_tick); /////////////
-			t->wake_tick = __INT64_MAX__; // sleep중이지 않은 쓰레드의 wake_tick은 MAX로 설정
+			// t->wake_tick = __INT64_MAX__; // sleep중이지 않은 쓰레드의 wake_tick은 MAX로 설정
 			// *** priority가 변경될 때, 해당 쓰레드가 sleep중인 경우에는 sleep_list에서 재정렬되는 것을 방지
 			thread_unblock(t);
 		} else {
@@ -442,12 +433,12 @@ int64_t thread_wake_sleepers(int64_t cur_tick) {
 	}
 
 	int64_t ret;
+	// 다음으로 쓰레드를 깨울 시각을 timer_sleep()에게 전달
 	if (list_empty(&sleep_list)) {
 		ret = __INT64_MAX__;
 	} else {
-		// 다음으로 쓰레드를 깨울 시각을 timer_sleep()에게 전달
-		t = list_entry(list_begin(&sleep_list), struct thread, elem);
-		ret = t->wake_tick;
+		ret = list_entry(list_begin(&sleep_list),
+						 struct thread, elem)->wake_tick;
 	}
 
 	intr_set_level (old_level);
@@ -471,11 +462,7 @@ thread_start (void) {
 
 	/* Wait for the idle thread to initialize idle_thread. */
 	sema_down (&idle_started);
-
-	// DEBUG
-	TEST();
 }
-
 
 // P1-AS
 static void update_priority(struct thread *t) {
@@ -483,7 +470,6 @@ static void update_priority(struct thread *t) {
 
 	// priority = PRI_MAX - (recent_cpu / 4) - (nice * 2),
 	t->priority = PRI_MAX - TO_INT(t->recent_cpu / 4) - t->nice * 2;
-	// clamp
 	t->priority = clamp_priority(t->priority);
 }
 
@@ -492,7 +478,8 @@ static void update_priority_all(void) {
 	
 	struct list_elem *e;
 	struct thread *t;
-	for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)) {
+	for (e = list_begin(&all_list);
+		 e != list_end(&all_list); e = list_next(e)) {
 		t = list_entry(e, struct thread, elem_2);
 		update_priority(t);
 	}
@@ -541,10 +528,8 @@ thread_tick (void) {
 
 	/* Enforce preemption. */
 	if (++thread_ticks >= TIME_SLICE) {
-		if (thread_mlfqs) { // P1-AS
-			// 모든 쓰레드의 priority를 업데이트
+		if (thread_mlfqs) // P1-AS
 			update_priority_all();
-		}
 		intr_yield_on_return ();
 	}
 }
@@ -742,10 +727,11 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	if (thread_mlfqs)
-		list_push_back (&ready_list, &t->elem); // P1-AS
-	else
-		list_insert_ordered (&ready_list, &t->elem, thread_priority_great, NULL); // P1-PS
+	list_push_back (&ready_list, &t->elem);
+	// if (thread_mlfqs)
+	// 	list_push_back (&ready_list, &t->elem); // P1-AS
+	// else
+	// 	list_insert_ordered (&ready_list, &t->elem, thread_priority_great, NULL); // P1-PS
 	
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
@@ -812,10 +798,11 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread) {
-		if (thread_mlfqs)
-			list_push_back (&ready_list, &curr->elem); // P1-AS
-		else
-			list_insert_ordered (&ready_list, &curr->elem, thread_priority_great, NULL); // P1-PS
+		list_push_back (&ready_list, &curr->elem);
+		// if (thread_mlfqs)
+		// 	list_push_back (&ready_list, &curr->elem); // P1-AS
+		// else
+		// 	list_insert_ordered (&ready_list, &curr->elem, thread_priority_great, NULL); // P1-PS
 	}
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
@@ -842,22 +829,23 @@ thread_set_priority (int new_priority) {
 
 	// 가장 높은 donor를 확인
 	// lock_list는 각 lock 안의 최우선 donor의 priority에 대해 정렬되어있다고 가정
-	int don_priority = PRI_MIN;
-	if (!list_empty(&t->lock_list)) {
-		struct lock *l = list_entry(list_begin(&t->lock_list), struct lock, elem);
-		if (!list_empty(&l->semaphore.waiters)) {
-			struct thread *donor_t = list_entry(list_begin(&l->semaphore.waiters),
-												struct thread, elem);
-			don_priority = donor_t->priority; // 최우선 donor
-		}
-	}
+	// int don_priority = PRI_MIN;
+	// if (!list_empty(&t->lock_list)) {
+	// 	struct lock *l = list_entry(list_begin(&t->lock_list), struct lock, elem);
+	// 	if (!list_empty(&l->semaphore.waiters)) {
+	// 		struct thread *donor_t = list_entry(list_begin(&l->semaphore.waiters),
+	// 											struct thread, elem);
+	// 		don_priority = donor_t->priority; // 최우선 donor
+	// 	}
+	// }
 
-	// donor의 priority를 받음
-	if (new_priority > don_priority) {
-		t->priority = new_priority;
-	} else {
-		t->priority = don_priority;
-	}
+	// // donor의 priority를 받음
+	// if (new_priority > don_priority) {
+	// 	t->priority = new_priority;
+	// } else {
+	// 	t->priority = don_priority;
+	// }
+	thread_recalculate_donate(t);
 
 	if (t->priority < old_priority) {
 		// priority가 감소하면 양보
@@ -885,16 +873,16 @@ void thread_donate_priority(struct thread *donor, struct thread *donee) {
 		ASSERT(donee->status != THREAD_RUNNING);
 
 		donee->priority = donor->priority; // priority 수정
-		if (donee->wake_tick == __INT64_MAX__) {
-			// donor가 sleep상태가 아닌 경우:
-			// ready_list 또는 waiters 내부에서 재정렬
-			list_sort_elem(&donee->elem, thread_priority_great, NULL);
-		}
+		// if (donee->wake_tick == __INT64_MAX__) {
+		// 	// donor가 sleep상태가 아닌 경우:
+		// 	// ready_list 또는 waiters 내부에서 재정렬
+		// 	list_sort_elem(&donee->elem, thread_priority_great, NULL);
+		// }
 
 		if (donee->donee_t) {
 			// donee가 다른 lock에서 대기중인 경우
 			// donee의 donee의 lock_list 재정렬 및 재귀 업데이트
-			list_sort(&donee->donee_t->lock_list, lock_priority_great, NULL);
+			// list_sort(&donee->donee_t->lock_list, lock_priority_great, NULL);
 			thread_donate_priority(donee, donee->donee_t);
 		}
 	}
@@ -908,18 +896,34 @@ void thread_recalculate_donate(struct thread *t) {
 		return;
 	
 	int new_priority = t->ori_priority;
-	if (!list_empty(&t->lock_list)) {
-		struct lock *l = list_entry(list_begin(&t->lock_list),
-									struct lock, elem);
-		if (!list_empty(&l->semaphore.waiters)) {
-			struct thread *t = list_entry(list_begin(&l->semaphore.waiters),
-											struct thread, elem);
-			// 최상위 lock의 최상위 thread의 priority 확인
-			if (t->priority > new_priority) {
-				new_priority = t->priority;
+
+	struct list_elem *iter_e;
+	struct lock *iter_l;
+	struct thread *iter_t;
+
+	// lock_list의 lock에서 최대 priority 추출
+	for (iter_e = list_begin(&t->lock_list); iter_e != list_end(&t->lock_list); iter_e = list_next(iter_e)) {
+		iter_l = list_entry(iter_e, struct lock, elem);
+		if (!list_empty(&iter_l->semaphore.waiters)) {
+			iter_t = list_entry(list_max(&iter_l->semaphore.waiters, thread_priority_less, NULL), struct thread, elem);
+			if (iter_t->priority > new_priority) {
+				new_priority = iter_t->priority;
 			}
 		}
 	}
+
+	// if (!list_empty(&t->lock_list)) {
+	// 	struct lock *l = list_entry(list_begin(&t->lock_list),
+	// 								struct lock, elem);
+	// 	if (!list_empty(&l->semaphore.waiters)) {
+	// 		struct thread *t = list_entry(list_begin(&l->semaphore.waiters),
+	// 										struct thread, elem);
+	// 		// 최상위 lock의 최상위 thread의 priority 확인
+	// 		if (t->priority > new_priority) {
+	// 			new_priority = t->priority;
+	// 		}
+	// 	}
+	// }
 	t->priority = new_priority;
 }
 
@@ -1029,9 +1033,9 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->priority = priority;
 	t->nice = 0; // P1-AS
 	t->ori_priority = priority; // P1-PS
-	t->wake_tick = __INT64_MAX__; // P1-AC
 	list_init(&t->lock_list); // P1-PS
 	t->donee_t = NULL; // P1-PS
+	t->wake_tick = __INT64_MAX__; // P1-AC
 	
 	t->magic = THREAD_MAGIC;
 }
@@ -1046,22 +1050,26 @@ next_thread_to_run (void) {
 	if (list_empty (&ready_list))
 		return idle_thread;
 	
-	if (thread_mlfqs) { // P1-AS
-		struct list_elem *e = list_max(&ready_list, thread_priority_less, NULL);
-		list_remove(e);
-		// if (timer_ticks() > 3010) { ////////////////////////////////////////////
-		// 	struct thread *t = list_entry(e, struct thread, elem);
-		// 	// printf("[DBG] next_thread_to_run(): next is %s} (pri = %d)\n", t->name, t->priority);
-		// 	g_pri[g_idx] = t->priority;
-		// 	g_ticks[g_idx] = timer_ticks();
-		// 	g_tid[g_idx] = t->tid;
-		// 	g_idx++;
+	struct list_elem *e = list_max(&ready_list, thread_priority_less, NULL);
+	list_remove(e);
+	return list_entry(e, struct thread, elem);
+	
+	// if (thread_mlfqs) { // P1-AS
+	// 	struct list_elem *e = list_max(&ready_list, thread_priority_less, NULL);
+	// 	list_remove(e);
+	// 	// if (timer_ticks() > 3010) { ////////////////////////////////////////////
+	// 	// 	struct thread *t = list_entry(e, struct thread, elem);
+	// 	// 	// printf("[DBG] next_thread_to_run(): next is %s} (pri = %d)\n", t->name, t->priority);
+	// 	// 	g_pri[g_idx] = t->priority;
+	// 	// 	g_ticks[g_idx] = timer_ticks();
+	// 	// 	g_tid[g_idx] = t->tid;
+	// 	// 	g_idx++;
 
-		// }
-		return list_entry(e, struct thread, elem);
-	} else {
-		return list_entry (list_pop_front (&ready_list), struct thread, elem);
-	}
+	// 	// }
+	// 	return list_entry(e, struct thread, elem);
+	// } else {
+	// 	return list_entry (list_pop_front (&ready_list), struct thread, elem);
+	// }
 }
 
 /* Use iretq to launch the thread */
