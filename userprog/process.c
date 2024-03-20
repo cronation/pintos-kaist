@@ -22,6 +22,9 @@
 #include "vm/vm.h"
 #endif
 
+#include "threads/synch.h" // P2
+// #include "userprog/syscall.h" // P2
+
 static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
@@ -31,6 +34,8 @@ static void __do_fork (void *);
 static void
 process_init (void) {
 	struct thread *current = thread_current ();
+
+	current->is_user = true; // user process 여부 저장 (P2)
 }
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
@@ -49,6 +54,14 @@ process_create_initd (const char *file_name) {
 	if (fn_copy == NULL)
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
+
+	// P2
+	// file_name에서 파일 이름을 제외한 인자를 모두 끊기
+	char *p = file_name;
+	while (*p != ' ' && *p != '\0') {
+		p += 1;
+	}
+	*p = '\0';
 
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
@@ -73,11 +86,57 @@ initd (void *f_name) {
 
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * TID_ERROR if the thread cannot be created. */
+// tid_t
+// process_fork (const char *name, struct intr_frame *if_ UNUSED) {
+// 	/* Clone current thread to new thread.*/
+// 	return thread_create (name,
+// 			PRI_DEFAULT, __do_fork, thread_current ());
+// }
+
+// process_fork()에서 thread_create의 인자로 전달할 구조체
+struct fork_args {
+	struct thread *parent;
+	struct intr_frame *if_;
+	struct semaphore fork_sema;
+};
+
+// P2
 tid_t
-process_fork (const char *name, struct intr_frame *if_ UNUSED) {
+process_fork (const char *name, struct intr_frame *if_) {
 	/* Clone current thread to new thread.*/
-	return thread_create (name,
-			PRI_DEFAULT, __do_fork, thread_current ());
+	struct fork_args *fargs = palloc_get_page(0);
+	if (fargs == NULL) {
+		return TID_ERROR;
+	}
+
+	fargs->parent = thread_current();
+	fargs->if_ = if_;
+
+	sema_init(&fargs->fork_sema, 0); // fork가 끝날 때까지 부모를 대기시키는 sema
+
+	// printf("[DBG] process_fork(): {%s} i made fargs!\n", thread_current()->name); ////////////
+
+	// printf("[DBG] process_fork(): {%s} received intr_frame address is %p\n", thread_current()->name, if_); //////
+
+	tid_t tid = thread_create (name, PRI_DEFAULT, __do_fork, fargs);
+	// tid_t tid = 4; /////////////////////////
+
+	// printf("[DBG] process_fork(): {%s} i did thread_create()! now i sleep...\n", thread_current()->name); ////////////
+	sema_down(&fargs->fork_sema); // __do_fork가 완료될 때까지 대기
+	struct thread *t = thread_get_by_id(tid);
+	if (t->p_tid == TID_ERROR) {
+		// p_tid가 TID_ERROR인 경우 fork가 실패했음을 뜻함 (__do_fork 참조)
+		// printf("[DBG] process_fork(): {%s} failed to create a child ({%s}, tid = %d)\n", thread_current()->name, t->name, t->tid); ///////////
+		sema_up(&t->reap_sema); // 프로세스 메모리 청소 허용
+		tid = TID_ERROR;
+	}
+	// printf("[DBG] process_fork(): {%s} successfully created a child ({%s}, tid = %d)\n", thread_current()->name, t->name, t->tid); ///////////
+
+	// printf("[DBG] process_fork(): {%s} hi! now i wake! (child tid = %d)\n", thread_current()->name, tid); ////////////
+
+	palloc_free_page(fargs);
+
+	return tid;
 }
 
 #ifndef VM
@@ -93,20 +152,53 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
 
+	// 인자로 전달된 pte는 복제할 page의 주소의 주소
+	// if (is_kernel_vaddr( PTE_ADDR(ptov(*pte)) )) {
+	// 	// pte가 커널 주소에 해당하면 아무 작업도 하지 않음
+	// 	// printf("[DBG] duplicate_pte(): pte is kernel\n"); ///////////////////
+	// 	return true;
+	// }
+
+	// if (is_kernel_vaddr(va)) {
+	if (is_kern_pte(pte)) {
+		return true;
+	}
+
+	// printf("[DBG] duplicate_pte(): pte is user, va = %p\n", va); ///////////////////
+
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page (parent->pml4, va);
 
+	// printf("[DBG] duplicate_pte(): parent_page at %p\n", parent_page); ///////////////////
+
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
+
+	newpage = palloc_get_page(PAL_USER); // 기존 pte에 대응되는 새로운 페이지 할당
+	if (newpage == NULL) {
+		// 할당 실패
+		return false;
+	}
+
+	// printf("[DBG] duplicate_pte(): newpage at %p\n", newpage); ///////////////////
 
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
 
+	memcpy(newpage, parent_page, PGSIZE); // 할당된 페이지로 데이터 복사
+	// writable = (uint64_t) *pte & PTE_W; // 기존 pte의 writable 여부
+	writable = is_writable(pte);
+
+	// printf("[DBG] duplicate_pte(): pte writable is %d\n", writable); ///////////////////
+
 	/* 5. Add new page to child's page table at address VA with WRITABLE
 	 *    permission. */
 	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
 		/* 6. TODO: if fail to insert page, do error handling. */
+		// printf("process.c - duplicate_pte() - pml4_set_page() failed!!!!!!!!!!\n "); //////////// WIP
+		return false;
+		// syscall_terminate();
 	}
 	return true;
 }
@@ -116,17 +208,98 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
  * Hint) parent->tf does not hold the userland context of the process.
  *       That is, you are required to pass second argument of process_fork to
  *       this function. */
+// static void
+// __do_fork (void *aux) {
+// 	struct intr_frame if_;
+// 	struct thread *parent = (struct thread *) aux;
+// 	struct thread *current = thread_current ();
+// 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
+// 	struct intr_frame *parent_if;
+// 	bool succ = true;
+
+// 	/* 1. Read the cpu context to local stack. */
+// 	memcpy (&if_, parent_if, sizeof (struct intr_frame));
+
+// 	/* 2. Duplicate PT */
+// 	current->pml4 = pml4_create();
+// 	if (current->pml4 == NULL)
+// 		goto error;
+
+// 	process_activate (current);
+// #ifdef VM
+// 	supplemental_page_table_init (&current->spt);
+// 	if (!supplemental_page_table_copy (&current->spt, &parent->spt))
+// 		goto error;
+// #else
+// 	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
+// 		goto error;
+// #endif
+
+// 	/* TODO: Your code goes here.
+// 	 * TODO: Hint) To duplicate the file object, use `file_duplicate`
+// 	 * TODO:       in include/filesys/file.h. Note that parent should not return
+// 	 * TODO:       from the fork() until this function successfully duplicates
+// 	 * TODO:       the resources of parent.*/
+
+// 	process_init ();
+
+// 	/* Finally, switch to the newly created process. */
+// 	if (succ)
+// 		do_iret (&if_);
+// error:
+// 	thread_exit ();
+// }
+
+// /* Switch the current execution context to the f_name.
+//  * Returns -1 on fail. */
+// int
+// process_exec (void *f_name) {
+// 	char *file_name = f_name;
+// 	bool success;
+
+// 	/* We cannot use the intr_frame in the thread structure.
+// 	 * This is because when current thread rescheduled,
+// 	 * it stores the execution information to the member. */
+// 	struct intr_frame _if;
+// 	_if.ds = _if.es = _if.ss = SEL_UDSEG;
+// 	_if.cs = SEL_UCSEG;
+// 	_if.eflags = FLAG_IF | FLAG_MBS;
+
+// 	/* We first kill the current context */
+// 	process_cleanup ();
+
+// 	/* And then load the binary */
+// 	success = load (file_name, &_if);
+
+// 	/* If load failed, quit. */
+// 	palloc_free_page (file_name);
+// 	if (!success)
+// 		return -1;
+
+// 	/* Start switched process. */
+// 	do_iret (&_if);
+// 	NOT_REACHED ();
+// }
+
+// P2
 static void
 __do_fork (void *aux) {
-	struct intr_frame if_;
-	struct thread *parent = (struct thread *) aux;
+	struct fork_args *fargs = (struct fork_args *) aux;
+
+	struct thread *parent = fargs->parent;
+	struct intr_frame *parent_if = fargs->if_;
+
 	struct thread *current = thread_current ();
-	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if;
+	struct intr_frame if_;
+	
 	bool succ = true;
+
+	// printf("[DBG] __do_fork(): {%s} i read from fargs!\n", thread_current()->name); ////////////
 
 	/* 1. Read the cpu context to local stack. */
 	memcpy (&if_, parent_if, sizeof (struct intr_frame));
+
+	// printf("[DBG] __do_fork(): {%s} i copied intr_frame!\n", thread_current()->name); ////////////
 
 	/* 2. Duplicate PT */
 	current->pml4 = pml4_create();
@@ -149,12 +322,40 @@ __do_fork (void *aux) {
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
 
+	// printf("[DBG] __do_fork(): HI! I'm {%s}. fd duplication goes here\n", current->name); ////////////
+	if (!thread_dup_file_list(parent, current)) { // parent의 file_list를 복사
+		goto error;
+	}
 	process_init ();
 
+	// printf("[DBG] __do_fork(): {%s} process_init() done!\n", thread_current()->name); ////////////
+
+
+	if_.R.rax = 0; // 반환 값을 0으로 설정
+
+	// printf("[DBG] __do_fork(): {%s} i am done! i wake my parent now!\n", thread_current()->name); ////////////
+
+	// printf("[DBG] syscall_handler(): {%s} intr_frame\n", thread_current()->name); ////////////////////
+	// print_if(&if_, "after copying"); ////////////////////////
+
+	// printf("[DBG] __do_fork(): {%s} sorry i QUIT\n", thread_current()->name); ////////////
+	// sema_down(&current->wait_sema); ///////////////////////////////
+
+	// printf("[DBG] __do_fork(): {%s} sorry i SLEEP\n", thread_current()->name); ////////////
+	// thread_yield(); ///////////////////////////////
+	// printf("[DBG] __do_fork(): {%s} oops i WAKE\n", thread_current()->name); ////////////
+
+	// print_if(&if_, "after sleep"); ////////////////////////
+	
 	/* Finally, switch to the newly created process. */
-	if (succ)
+	if (succ) {
+		sema_up(&fargs->fork_sema); // 대기중인 부모 프로세스를 깨운다
 		do_iret (&if_);
+	}
 error:
+	// printf("[DBG] __do_fork(): {%s} error during duplication! exiting\n", current->name); ////////////////////
+	current->p_tid = TID_ERROR; // fork 실패 시 부모 tid를 -1로 설정
+	sema_up(&fargs->fork_sema); // 대기중인 부모 프로세스를 깨운다
 	thread_exit ();
 }
 
@@ -175,6 +376,9 @@ process_exec (void *f_name) {
 
 	/* We first kill the current context */
 	process_cleanup ();
+
+	// printf("received address is %p\n", f_name); //////////////
+	// printf("[DBG] process_exec(): {%s} file name is: %s OR %s\n", thread_current()->name, f_name, file_name); //////
 
 	/* And then load the binary */
 	success = load (file_name, &_if);
@@ -200,11 +404,28 @@ process_exec (void *f_name) {
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) {
+process_wait (tid_t tid) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	return -1;
+	
+	struct thread *t = thread_get_by_id(tid);
+
+	if (t == NULL || t->p_tid != thread_current()->tid) {
+		// tid 쓰레드가 없거나 자식 프로세스가 아님
+		// printf("[DBG] proceses_wait(): {%s} no child with tid = %d\n", thread_current()->name, tid); /////////////
+		return -1;
+	}
+	t->p_tid = TID_ERROR; // 두 번 wait 불가하도록 부모를 삭제
+
+	// printf("[DBG] process_wait(): {%s} will now wait for {%s}\n", thread_current()->name, t->name); ///////////
+	sema_down(&t->wait_sema); // 자식이 끝날 때까지 대기
+	// printf("[DBG] process_wait(): {%s} done waiting for {%s}\n", thread_current()->name, t->name); ///////////
+	int child_exit = t->exit_status;
+	sema_up(&t->reap_sema); // 자식 프로세스의 메모리 청소를 허용
+	// printf("[DBG] process_wait(): {%s} now reaped {%s}\n", thread_current()->name, t->name); ///////////
+
+	return child_exit;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -216,13 +437,34 @@ process_exit (void) {
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
 
+	if (curr->is_user) {
+		printf ("%s: exit(%d)\n", curr->name, curr->exit_status); ////////////////////
+	}
+
+	// printf("[DBG] process_exit(): {%s} will wake waiting parent\n", curr->name); //////////////
+	sema_up(&thread_current()->wait_sema); // 대기중인 부모를 깨움
+
+	// printf("[DBG] process_exit(): {%s} waked parents, now will wait for reap\n", curr->name); //////////////
+	thread_clear_file_list(); // file_list에 속한 모든 파일을 닫고 리스트 삭제
+
 	process_cleanup ();
+
+	sema_down(&thread_current()->reap_sema); // 부모가 reap 할 때까지 대기
+
+	// printf("[DBG] process_exit(): {%s} is reaped, now i can die...\n", curr->name); //////////////
 }
 
 /* Free the current process's resources. */
 static void
 process_cleanup (void) {
 	struct thread *curr = thread_current ();
+
+	// printf("[DBG] process_cleanup(): exe_file of {%s} at %p\n", thread_current()->name, curr->exe_file); ///////
+	if (curr->exe_file) {
+		// 수정 방지를 위해 열어둔 파일 닫기
+		file_allow_write(curr->exe_file);
+		file_close(curr->exe_file);
+	}
 
 #ifdef VM
 	supplemental_page_table_kill (&curr->spt);
@@ -335,6 +577,15 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());
 
+	// P2
+	// file_name에서 파일 이름을 제외한 인자를 모두 끊기
+	char *p = file_name;
+	while (*p != ' ' && *p != '\0') {
+		p += 1;
+	}
+	char old_c = *p;
+	*p = '\0';
+
 	/* Open executable file. */
 	file = filesys_open (file_name);
 	if (file == NULL) {
@@ -414,14 +665,110 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
 
-	/* TODO: Your code goes here.
-	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	// printf("[DBG] load(): file_name = %s\n", file_name); //////////////////////////
+
+
+	// /* TODO: Your code goes here.
+	//  * TODO: Implement argument passing (see project2/argument_passing.html). */
+
+	char *rsp_start = if_->rsp;
+	// printf("[DBG] load(): original rsp = %p\n", rsp_start); ////////////////////////
+
+
+	*p = old_c; // 끊어놓은 file_name을 원상복구
+	char *start_p = file_name;
+
+	p = start_p;
+	while (*p != '\0') {
+		p += 1;
+	}
+	char *end_p = p;
+	// printf("[DBG] load(): start_p = %p, end_p = %p\n", start_p, end_p); ////////////////////////
+
+	int len;
+
+	// push argv[][]
+	p = end_p -1;
+	while (p >= start_p) {
+		while (*p == ' ') {
+			// 공백을 모두 스킵
+			p -= 1;
+		}
+		// printf("skipped spaces (p = %p)\n", p); ///////////////
+
+		len = 0;
+		for (; p >= start_p && *p != ' '; p -= 1) {
+			// 공백이나 첫 문자가 나올 때까지 탐색
+			len += 1;
+		}
+		// printf("token start found: p = %p, *p = %c, len = %d\n", p, *p, len); ///////////////
+
+		if_->rsp -= len +1;
+		strlcpy(if_->rsp, p +1, len +1);
+
+		// printf("[DBG] load(): after argv[][] rsp = %p\n", if_->rsp); ////////////////////////
+		// printf("[DBG] load(): argv[][] = %s\n", if_->rsp); ////////////////////////
+	}
+
+	// word-align
+	if_->rsp -= if_->rsp % sizeof(char*);
+	// printf("[DBG] load(): after pad rsp = %p\n", if_->rsp); ////////////////////////
+
+	// push argv[argc]
+	if_->rsp -= sizeof(char*);
+	*( (char **) if_->rsp) = NULL;
+
+	// push argv[]
+	int argc = 0;
+	char *argv = NULL;
+	p = end_p -1;
+	len = 0;
+	while (p >= start_p) {
+		while (*p == ' ') {
+			// 공백을 모두 스킵
+			p -= 1;
+		}
+		// printf("skipped spaces (p = %p)\n", p); ///////////////
+		
+		for (; p >= start_p && *p != ' '; p -= 1) {
+			// 공백이나 첫 문자가 나올 때까지 탐색
+			len += 1;
+		}
+		len += 1;
+		// printf("length is %d\n", len); ///////////////
+
+		if_->rsp -= sizeof(char*);
+		*( (char **) if_->rsp) = rsp_start - len;
+		// printf("rsp_start = %p, len = %d\n", rsp_start, len); ////////////////
+
+		argc += 1;
+		argv = if_->rsp;
+
+		// printf("[DBG] load(): after argv[] rsp = %p\n", if_->rsp); ////////////////////////
+		// printf("[DBG] load(): argv[] = %p\n", *((char **)if_->rsp) ); ////////////////////////
+	}
+
+	// push return address
+	if_->rsp -= sizeof(void (*) ());
+	*( (void **) if_->rsp) = NULL;
+
+	// printf("[DBG] load(): after return address rsp = %p\n", if_->rsp); ////////////////////////
+	// printf("[DBG] load(): return address = %p\n", *((char **)if_->rsp) ); ////////////////////////
+
+	// printf("[DBG] load(): argc = %d, argv = %p\n", argc, argv); ////////////////
+
+	if_->R.rdi = argc;
+	if_->R.rsi = argv;
 
 	success = true;
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close (file);
+	if (file) {
+		file_deny_write(file); // 실행중인 파일 수정을 막기 위해 파일을 열어둠
+	}
+	t->exe_file = file;
+	// file_close (file);
 	return success;
 }
 

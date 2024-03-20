@@ -126,7 +126,8 @@ sema_up (struct semaphore *sema) {
 	sema->value++;
 	
 	intr_set_level (old_level);
-	thread_yield();
+	// thread_yield();
+	thread_preempt(); // P2-AP
 }
 
 static void sema_test_helper (void *sema_);

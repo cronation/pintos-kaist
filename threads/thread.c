@@ -13,6 +13,9 @@
 #include "intrinsic.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "threads/malloc.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -140,13 +143,17 @@ thread_init (void) {
 	initial_thread->tid = allocate_tid ();
 
 	list_init(&sleep_list); // P1-AC
-	if (thread_mlfqs) { // P1-AS
-		list_init(&all_list);
+	// P1-AS
+	list_init(&all_list); // P2에서 all_list를 사용
+	list_push_back(&all_list, &initial_thread->elem_2);
+	
+	if (thread_mlfqs) {
 		// main 쓰레드 설정
-		list_push_back(&all_list, &initial_thread->elem_2);
 		initial_thread->nice = 0;
 		initial_thread->recent_cpu = 0;
 	}
+
+	initial_thread->p_tid = TID_ERROR; // main 쓰레드는 부모가 없음
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -157,14 +164,16 @@ thread_start (void) {
 	struct semaphore idle_started;
 	sema_init (&idle_started, 0);
 	thread_create ("idle", PRI_MIN, idle, &idle_started);
-	if (thread_mlfqs) // P1-AS
-		list_remove(&idle_thread->elem_2); // all_list에서 idle은 제외
 
 	/* Start preemptive thread scheduling. */
 	intr_enable ();
 
 	/* Wait for the idle thread to initialize idle_thread. */
 	sema_down (&idle_started);
+
+	// if (thread_mlfqs) // P1-AS
+	// 	list_remove(&idle_thread->elem_2); // all_list에서 idle은 제외
+	list_remove(&idle_thread->elem_2); // P2에서 all_list를 사용
 }
 
 /* Called by the timer interrupt handler at each timer tick.
@@ -216,6 +225,29 @@ thread_print_stats (void) {
 			idle_ticks, kernel_ticks, user_ticks);
 }
 
+// P2
+// 쓰레드 구조체 내의 file_list를 초기화하고 stdin, stdout을 추가
+static void init_file_list(struct thread *t) {
+	struct list *file_list = &t->file_list;
+	list_init(file_list);
+	
+	struct file_elem *stdin_fe = malloc(sizeof(*stdin_fe));
+	// struct file_elem *stdin_fe = palloc_get_page(PAL_USER);
+	stdin_fe->fd = 0;
+	stdin_fe->file = NULL;
+	stdin_fe->std_no = STDIN_FILENO;
+	// list_insert_ordered(&file_list, &stdin_fe.elem, file_elem_fd_less, NULL);
+	list_push_back(file_list, &stdin_fe->elem);
+
+	struct file_elem *stdout_fe = malloc(sizeof(*stdout_fe));
+	// struct file_elem *stdout_fe = palloc_get_page(PAL_USER);
+	stdout_fe->fd = 1;
+	stdout_fe->file = NULL;
+	stdout_fe->std_no = STDOUT_FILENO;
+	// list_insert_ordered(&file_list, &stdout_fe.elem, file_elem_fd_less, NULL);
+	list_push_back(file_list, &stdout_fe->elem);
+}
+
 /* Creates a new kernel thread named NAME with the given initial
    PRIORITY, which executes FUNCTION passing AUX as the argument,
    and adds it to the ready queue.  Returns the thread identifier
@@ -248,16 +280,26 @@ thread_create (const char *name, int priority,
 	init_thread (t, name, priority);
 	tid = t->tid = allocate_tid ();
 
-	if (thread_mlfqs) { // P1-AS
-		struct thread *cur_t = thread_current();
-		t->nice = cur_t->nice; // nice 상속
-		t->recent_cpu = cur_t->recent_cpu; // recent_cpu 상속
-		t->priority = cur_t->priority; // priority 상속
+	// printf("[DBG] thread_create(): init {%s} done (by {%s})\n", t->name, thread_current()->name); ///////////////////
 
-		enum intr_level old_level = intr_disable();
-		list_push_back(&all_list, &t->elem_2); // all_list에 삽입
-		intr_set_level(old_level);
+	// 상속 및 부모-자식 관계 설정
+	struct thread *cur_t = thread_current();
+
+	// P2에서 all_list를 사용
+	enum intr_level old_level = intr_disable();
+	list_push_back(&all_list, &t->elem_2); // all_list에 삽입
+	intr_set_level(old_level);
+
+	if (thread_mlfqs) { // P1-AS
+		// nice, recent_cpu, priority 상속
+		t->nice = cur_t->nice;
+		t->recent_cpu = cur_t->recent_cpu;
+		t->priority = cur_t->priority;
 	}
+
+	t->p_tid = cur_t->tid; // 부모 쓰레드 tid 저장 (P2)
+
+	init_file_list(t); // fd table로 사용되는 file_list 초기화 (P2)
 
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
@@ -272,7 +314,8 @@ thread_create (const char *name, int priority,
 
 	/* Add to run queue. */
 	thread_unblock (t);
-	thread_yield(); // P1-PS
+	// thread_yield(); // P1-PS
+	thread_preempt(); // P2-AP
 
 	return tid;
 }
@@ -350,6 +393,7 @@ int64_t thread_wake_sleepers(int64_t cur_tick) {
 			e = list_remove(e);
 			e = e->prev; // thread_unblock을 하면 e의 next/prev가 바뀌므로
 			thread_unblock(t);
+			// printf("[DBG] thread_wake_sleepers(): waking {%s}\n", t->name); ////////////////////
 		} else {
 			break; // 나머지는 시간이 남았으므로 스킵
 		}
@@ -396,26 +440,70 @@ thread_current (void) {
 }
 
 /* Returns the running thread's tid. */
-tid_t
-thread_tid (void) {
-	return thread_current ()->tid;
-}
+// tid_t
+// thread_tid (void) {
+// 	return thread_current ()->tid;
+// }
 
-/* Deschedules the current thread and destroys it.  Never
-   returns to the caller. */
+// /* Deschedules the current thread and destroys it.  Never
+//    returns to the caller. */
+// void
+// thread_exit (void) {
+// 	ASSERT (!intr_context ());
+
+// #ifdef USERPROG
+// 	process_exit ();
+// #endif
+
+// 	/* Just set our status to dying and schedule another process.
+// 	   We will be destroyed during the call to schedule_tail(). */
+// 	intr_disable ();
+// 	do_schedule (THREAD_DYING);
+// 	NOT_REACHED ();
+// }
 void
 thread_exit (void) {
 	ASSERT (!intr_context ());
 
+	tid_t tid = thread_current()->tid;
+
 #ifdef USERPROG
+
+	// sema_up(&thread_current()->wait_sema); // 대기중인 부모를 깨움
+
+	// printf("[DBG] thread_exit(): {%s} before process_exit()\n", thread_current()->name); ///////
+
 	process_exit ();
+
+	// sema_down(&thread_current()->reap_sema); // 부모가 reap 할 때까지 대기
 #endif
 
 	/* Just set our status to dying and schedule another process.
 	   We will be destroyed during the call to schedule_tail(). */
 	intr_disable ();
-	if (thread_mlfqs) // all_list에서 삭제 (P1-AS)
-		list_remove(&thread_current()->elem_2);
+	// if (thread_mlfqs) // all_list에서 삭제 (P1-AS)
+		// list_remove(&thread_current()->elem_2);
+	
+	list_remove(&thread_current()->elem_2);
+
+	// 모든 자식 쓰레드를 reap
+	struct thread *t;
+	struct list_elem *e;
+
+	for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)) {
+		t = list_entry(e, struct thread, elem_2);
+		ASSERT(is_thread(t));
+		if (t->p_tid == tid) {
+			// 자식 쓰레드를 발견, reap
+			sema_up(&t->reap_sema);
+		}
+	}
+
+#ifdef USERPROG
+
+
+#endif
+
 	do_schedule (THREAD_DYING);
 	NOT_REACHED ();
 }
@@ -434,6 +522,22 @@ thread_yield (void) {
 		list_push_back (&ready_list, &curr->elem);
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
+}
+
+// P2-AP
+// ready_list의 최대 priority가 더 높으면 yield
+void thread_preempt(void) {
+	struct thread *curr = thread_current();
+
+	if (!list_empty(&ready_list)) {
+		struct thread *next = list_entry(list_max(&ready_list,
+												  thread_priority_less, NULL),
+										 struct thread, elem);
+		if (next->priority > curr->priority) {
+			thread_yield();
+			return;
+		}
+	}
 }
 
 // ============================= [PRI FUNC] ====================================
@@ -557,6 +661,184 @@ bool thread_priority_less(const struct list_elem *a,
 	struct thread *tb = list_entry(b, struct thread, elem);
 
 	return ta->priority < tb->priority;
+}
+
+// ============================= [PRCS FUNC] ===================================
+
+// tid인 쓰레드를 반환
+struct thread *thread_get_by_id(tid_t tid) {
+	if (tid == TID_ERROR) {
+		return NULL;
+	}
+
+	struct thread *t;
+	struct list_elem *e;
+
+	enum intr_level old_level = intr_disable();
+
+	for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)) {
+		t = list_entry(e, struct thread, elem_2);
+		ASSERT(is_thread(t));
+		if (t->tid == tid) {
+			break;
+		}
+	}
+
+	intr_set_level(old_level);
+
+	if (e == list_end(&all_list)) {
+		// child_tid 탐색 실패
+		return NULL;
+	}
+
+	return t;
+}
+
+// P2
+// fork 호출 시 file_list를 복사, 실패 시 -1 반환
+// int syscall_dup_file_list(struct thread *old_t, struct thread *new_t) {
+bool thread_dup_file_list(struct thread *old_t, struct thread *new_t) {
+	struct list *old_l = &old_t->file_list;
+	struct list *new_l = &new_t->file_list;
+
+	list_init(new_l);
+
+	struct list_elem *e;
+	struct file_elem *fe;
+	struct file_elem *clone_fe;
+
+	for (e = list_begin(old_l); e != list_end(old_l); e = list_next(e)) {
+		fe = list_entry(e, struct file_elem, elem);
+
+		clone_fe = malloc(sizeof(*clone_fe));
+		if (clone_fe == NULL) {
+			return false;
+		}
+		clone_fe->fd = fe->fd;
+		clone_fe->std_no = fe->std_no;
+		if (fe->file) {
+			clone_fe->file = file_duplicate(fe->file);
+			if (clone_fe->file == NULL) {
+				return false;
+			}
+		} else {
+			// file이 stdin/stdout이거나 dup 닫기에 의해 삭제된 상태여서 NULL임
+			clone_fe->file = NULL;
+		}
+
+		list_push_back(new_l, &clone_fe->elem);
+	}
+
+	return true;
+}
+
+// P2
+// exit 호출 시 file_list를 모두 삭제
+void thread_clear_file_list(void) {
+	struct list *file_list = &thread_current()->file_list;
+	struct list_elem *e, *e2;
+	struct file_elem *fe, *fe2;
+
+	// for (e = list_begin(file_list); e != list_end(file_list); e = list_remove(e)) {
+
+	for (e = list_begin(file_list); e != list_end(file_list); e = list_begin(file_list)) {
+		fe = list_entry(e, struct file_elem, elem);
+
+		// file_close(fe->file);
+		// list_remove(&fe->elem);
+		// free(fe);
+
+		// e = list_prev(e);
+		// list_remove(e);
+
+		if (fe->file) {
+			// dup된 fd가 있다면, file을 모두 NULL로 변경
+			for (e2 = list_next(e); e2 != list_end(file_list); e2 = list_next(e)) {
+				fe2 = list_entry(e2, struct file_elem, elem);
+
+				if (fe->file == fe2->file) {
+					// 복사된 fd 발견
+					fe2->file = NULL;
+				}
+			}
+			file_close(fe->file);
+		}
+
+		list_remove(e);
+		free(fe);
+
+		// close(fe->fd);
+
+
+		// struct file_elem *fe = get_file_in_list(fd);
+
+		// if (fe == NULL) {
+		// 	// fd에 해당하는 요소가 없음
+		// 	exit(-1);
+		// }
+
+		// // file이 NULL이면 복사된 fd에 의해 이미 닫힌 파일
+
+		// if (fe->file != NULL) {
+		// 	// 이미 닫힌 파일이 아닌 경우
+		// 	struct list *file_list = &thread_current()->file_list;
+		// 	struct list_elem *e;
+		// 	struct file_elem *dup_fe;
+
+		// 	// 복사된 fd를 모두 찾아 file을 NULL로 변경
+		// 	for (e = list_begin(file_list); e != list_end(file_list); e = list_next(e)) {
+		// 		dup_fe = list_entry(e, struct file_elem, elem);
+		// 		if (dup_fe->file == fe->file) {
+		// 			dup_fe->file = NULL;
+		// 		}
+		// 	}
+		// }
+
+		// file_close(fe->file);
+		// list_remove(&fe->elem);
+		// free(fe);
+
+
+	}
+}
+
+// P2
+// child_tid를 가진 쓰레드가 exit할 때까지 대기
+int thread_wait(tid_t child_tid) {
+	// printf("[DBG] thread_wait(): {%s} will wait for tid=%d\n", thread_current()->name, child_tid); //////////////
+	struct thread *t;
+	struct list_elem *e;
+
+	enum intr_level old_level = intr_disable();
+
+	for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)) {
+		t = list_entry(e, struct thread, elem_2);
+		ASSERT(is_thread(t));
+		if (t->tid == child_tid) {
+			break;
+		}
+	}
+
+	intr_set_level(old_level);
+
+	if (e == list_end(&all_list)) {
+		// child_tid 탐색 실패
+		return -1;
+	}
+
+	if (t->p_tid != thread_current()->tid) {
+		// child_tid 쓰레드가 자식 프로세스가 아님
+		return -1;
+	}
+
+	// printf("[DBG] thread_wait(): {%s} will now wait for {%s}\n", thread_current()->name, t->name); ///////////
+	sema_down(&t->wait_sema); // 자식이 끝날 때까지 대기
+	// printf("[DBG] thread_wait(): {%s} done waiting for {%s}\n", thread_current()->name, t->name); ///////////
+	int child_exit = t->exit_status;
+	sema_up(&t->reap_sema); // 자식 프로세스의 메모리 청소를 허용
+	// printf("[DBG] thread_wait(): {%s} now reaped {%s}\n", thread_current()->name, t->name); ///////////
+
+	return child_exit;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -699,6 +981,12 @@ init_thread (struct thread *t, const char *name, int priority) {
 	list_init(&t->lock_list); // P1-PS
 	t->donee_t = NULL; // P1-PS
 	t->wake_tick = __INT64_MAX__; // P1-AC
+
+	// P2
+	sema_init(&t->wait_sema, 0);
+	sema_init(&t->reap_sema, 0);
+
+	t->is_user = false; // user process 여부 저장 (P2)
 	
 	t->magic = THREAD_MAGIC;
 }

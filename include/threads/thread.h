@@ -5,10 +5,20 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "threads/synch.h" // P2
+#include "filesys/file.h" // P2
 #ifdef VM
 #include "vm/vm.h"
 #endif
 
+// P2
+// file_list에 포함되는 구조체, file 구조체와 file descriptor를 포함
+struct file_elem {
+	int fd;
+	struct file *file;
+	int std_no; // stdin, stdout일 경우 0, 1, 일반 파일은 -1
+	struct list_elem elem;
+};
 
 /* States in a thread's life cycle. */
 enum thread_status {
@@ -112,6 +122,14 @@ struct thread {
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
+	// P2
+	struct file *exe_file; // 실행중인 프로그램의 파일 구조체
+	struct list file_list; // 열려있는 파일의 리스트, fd순으로 정렬되어있음
+	tid_t p_tid; // 부모 쓰레드의 tid
+	struct semaphore wait_sema; // 부모가 현재 쓰레드 종료를 대기
+	struct semaphore reap_sema; // 현재 쓰레드가 부모의 wait 호출을 대기
+	int exit_status;
+	bool is_user;
 #endif
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
@@ -151,6 +169,7 @@ const char *thread_name (void);
 
 void thread_exit (void) NO_RETURN;
 void thread_yield (void);
+void thread_preempt (void); // P1-AC
 
 void thread_set_priority (int);
 int thread_get_priority (void);
@@ -167,6 +186,15 @@ bool thread_wake_tick_less(const struct list_elem *a,
 bool thread_priority_less(const struct list_elem *a,
 	const struct list_elem *b, void *aux); // P1-AS
 
+// P2
+bool syscall_dup_file_list(void *old_t, void *new_t);
+void syscall_clear_file_list(void);
+struct thread *thread_get_by_id(tid_t tid);
+int thread_wait(tid_t child_tid);
+
 void do_iret (struct intr_frame *tf);
+
+
+int thread_wait(tid_t child_tid); // P2
 
 #endif /* threads/thread.h */
