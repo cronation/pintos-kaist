@@ -22,15 +22,26 @@
 #include "vm/vm.h"
 #endif
 
+#include "threads/synch.h" // P2
+
 static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
 
+
+// process_fork()에서 thread_create의 인자로 전달할 구조체 (P2)
+struct fork_args {
+	struct thread *parent;
+	struct intr_frame *if_;
+	struct semaphore fork_sema;
+};
+
 /* General process initializer for initd and other process. */
 static void
 process_init (void) {
 	struct thread *current = thread_current ();
+	current->is_user = true; // user process 여부 저장 (P2)
 }
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
@@ -49,6 +60,14 @@ process_create_initd (const char *file_name) {
 	if (fn_copy == NULL)
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
+
+	// P2
+	// file_name에서 파일 이름을 제외한 인자를 모두 끊기
+	char *p = file_name;
+	while (*p != ' ' && *p != '\0') {
+		p += 1;
+	}
+	*p = '\0';
 
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
@@ -74,10 +93,33 @@ initd (void *f_name) {
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * TID_ERROR if the thread cannot be created. */
 tid_t
-process_fork (const char *name, struct intr_frame *if_ UNUSED) {
+process_fork (const char *name, struct intr_frame *if_) {
 	/* Clone current thread to new thread.*/
-	return thread_create (name,
-			PRI_DEFAULT, __do_fork, thread_current ());
+	struct fork_args *fargs = palloc_get_page(0);
+	if (fargs == NULL) {
+		return TID_ERROR;
+	}
+
+	fargs->parent = thread_current();
+	fargs->if_ = if_;
+
+	sema_init(&fargs->fork_sema, 0); // fork가 끝날 때까지 부모를 대기시키는 sema
+
+	tid_t tid = thread_create (name, PRI_DEFAULT, __do_fork, fargs);
+
+	if (tid != TID_ERROR) {
+		sema_down(&fargs->fork_sema); // __do_fork가 완료될 때까지 대기
+		struct thread *t = thread_get_by_id(tid);
+		if (t->p_tid == TID_ERROR) {
+			// p_tid가 TID_ERROR인 경우 fork가 실패했음을 뜻함 (__do_fork 참조)
+			sema_up(&t->reap_sema); // 프로세스 메모리 청소 허용
+			tid = TID_ERROR;
+		}
+	}
+
+	palloc_free_page(fargs);
+
+	return tid;
 }
 
 #ifndef VM
@@ -92,21 +134,33 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	bool writable;
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
+	if (is_kern_pte(pte)) {
+		return true;
+	}
 
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page (parent->pml4, va);
 
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
+	newpage = palloc_get_page(PAL_USER); // 기존 pte에 대응되는 새로운 페이지 할당
+	if (newpage == NULL) {
+		// 할당 실패
+		return false;
+	}
 
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
+	memcpy(newpage, parent_page, PGSIZE); // 할당된 페이지로 데이터 복사
+	writable = is_writable(pte);
 
 	/* 5. Add new page to child's page table at address VA with WRITABLE
 	 *    permission. */
 	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
 		/* 6. TODO: if fail to insert page, do error handling. */
+		palloc_free_page(newpage);
+		return false;
 	}
 	return true;
 }
@@ -118,11 +172,14 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
  *       this function. */
 static void
 __do_fork (void *aux) {
-	struct intr_frame if_;
-	struct thread *parent = (struct thread *) aux;
+	struct fork_args *fargs = (struct fork_args *) aux;
+
+	struct thread *parent = fargs->parent;
+	struct intr_frame *parent_if = fargs->if_;
+
 	struct thread *current = thread_current ();
-	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if;
+	struct intr_frame if_;
+	
 	bool succ = true;
 
 	/* 1. Read the cpu context to local stack. */
@@ -148,13 +205,21 @@ __do_fork (void *aux) {
 	 * TODO:       in include/filesys/file.h. Note that parent should not return
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
-
+	if (!thread_dup_file_list(parent, current)) { // parent의 file_list를 복사
+		goto error;
+	}
 	process_init ();
 
+	if_.R.rax = 0; // 반환 값을 0으로 설정
+	
 	/* Finally, switch to the newly created process. */
-	if (succ)
+	if (succ) {
+		sema_up(&fargs->fork_sema); // 대기중인 부모 프로세스를 깨운다
 		do_iret (&if_);
+	}
 error:
+	current->p_tid = TID_ERROR; // fork 실패 시 부모 tid를 -1로 설정
+	sema_up(&fargs->fork_sema); // 대기중인 부모 프로세스를 깨운다
 	thread_exit ();
 }
 
@@ -200,11 +265,20 @@ process_exec (void *f_name) {
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) {
-	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
-	 * XXX:       to add infinite loop here before
-	 * XXX:       implementing the process_wait. */
-	return -1;
+process_wait (tid_t tid) {
+	struct thread *t = thread_get_by_id(tid);
+
+	if (t == NULL || t->p_tid != thread_current()->tid) {
+		// tid 쓰레드가 없거나 자식 프로세스가 아님
+		return -1;
+	}
+	t->p_tid = TID_ERROR; // 두 번 wait 불가하도록 부모를 삭제
+
+	sema_down(&t->wait_sema); // 자식이 끝날 때까지 대기
+	int child_exit = t->exit_status;
+	sema_up(&t->reap_sema); // 자식 프로세스의 메모리 청소를 허용
+
+	return child_exit;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -215,14 +289,26 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
+	if (curr->is_user) {
+		printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
+	}
 
+	sema_up(&thread_current()->wait_sema); // 대기중인 부모를 깨움
+	thread_clear_fd_page_list(curr);
 	process_cleanup ();
+	sema_down(&thread_current()->reap_sema); // 부모가 reap 할 때까지 대기
 }
 
 /* Free the current process's resources. */
 static void
 process_cleanup (void) {
 	struct thread *curr = thread_current ();
+
+	if (curr->exe_file) {
+		// 수정 방지를 위해 열어둔 파일 닫기
+		file_allow_write(curr->exe_file);
+		file_close(curr->exe_file);
+	}
 
 #ifdef VM
 	supplemental_page_table_kill (&curr->spt);
@@ -335,6 +421,15 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());
 
+	// P2
+	// file_name에서 파일 이름을 제외한 인자를 모두 끊기
+	char *p = file_name;
+	while (*p != ' ' && *p != '\0') {
+		p += 1;
+	}
+	char old_c = *p;
+	*p = '\0';
+
 	/* Open executable file. */
 	file = filesys_open (file_name);
 	if (file == NULL) {
@@ -414,14 +509,85 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
 
-	/* TODO: Your code goes here.
-	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	// /* TODO: Your code goes here.
+	//  * TODO: Implement argument passing (see project2/argument_passing.html). */
+
+	char *rsp_start = (char *) if_->rsp;
+
+	*p = old_c; // 끊어놓은 file_name을 원상복구
+	char *start_p = file_name;
+
+	p = start_p; // command line 시작
+	while (*p != '\0') {
+		p += 1;
+	}
+	char *end_p = p; // command line 끝
+
+	int len;
+
+	// push argv[][]
+	p = end_p -1;
+	while (p >= start_p) { // command line 끝부터 탐색
+		while (*p == ' ') { // 공백을 모두 스킵
+			p -= 1;
+		}
+
+		len = 0;
+		for (; p >= start_p && *p != ' '; p -= 1) {
+			// 공백이나 첫 문자가 나올 때까지 탐색
+			len += 1;
+		}
+
+		if_->rsp -= len +1;
+		strlcpy((char *) if_->rsp, p +1, len +1); // stack push
+	}
+
+	// word-align
+	if_->rsp -= if_->rsp % sizeof(char*);
+
+	// push argv[argc]
+	if_->rsp -= sizeof(char*);
+	*( (char **) if_->rsp) = NULL;
+
+	// push argv[]
+	// push argv[][]와 같지만, 단어의 길이만 push
+	int argc = 0;
+	char *argv = NULL;
+	p = end_p -1;
+	len = 0;
+	while (p >= start_p) {
+		while (*p == ' ') { // 공백을 모두 스킵
+			p -= 1;
+		}
+		
+		for (; p >= start_p && *p != ' '; p -= 1) {
+			// 공백이나 첫 문자가 나올 때까지 탐색
+			len += 1;
+		}
+		len += 1;
+
+		if_->rsp -= sizeof(char*);
+		*( (char **) if_->rsp) = rsp_start - len; // stack push
+
+		argc += 1; // rdi에 입력할 argc
+		argv = (char *) if_->rsp; // rsi에 입력할 argv
+	}
+
+	// push return address
+	if_->rsp -= sizeof(void*);
+	*( (void **) if_->rsp) = NULL;
+
+	if_->R.rdi = argc;
+	if_->R.rsi = argv;
 
 	success = true;
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close (file);
+	if (file) {
+		file_deny_write(file); // 실행중인 파일 수정을 막기 위해 파일을 열어둠
+	}
+	t->exe_file = file;
 	return success;
 }
 
