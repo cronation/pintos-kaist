@@ -21,7 +21,12 @@ static const struct page_operations anon_ops = {
 void
 vm_anon_init (void) {
 	/* TODO: Set up the swap_disk. */
-	swap_disk = NULL;
+	swap_disk = disk_get(1, 1);
+
+	// printf("[DBG] swap_disk capacity %d\n", disk_size(swap_disk)); ////////////////
+
+	// swap disk의 sector 수와 같은 크기의 비트맵 생성
+	swap_bitmap = bitmap_create(disk_size(swap_disk));
 }
 
 /* Initialize the file mapping */
@@ -31,22 +36,26 @@ anon_initializer (struct page *page, enum vm_type type, void *kva) {
 	page->operations = &anon_ops;
 
 	struct anon_page *anon_page = &page->anon;
+	anon_page->is_stack = type & VM_STACK;
 }
 
 /* Swap in the page by read contents from the swap disk. */
 static bool
 anon_swap_in (struct page *page, void *kva) {
-	struct anon_page *anon_page = &page->anon;
+	// struct anon_page *anon_page = &page->anon;
+	disk_read(swap_disk, page->anon.swap_sec_no, page->va);
 }
 
 /* Swap out the page by writing contents to the swap disk. */
 static bool
 anon_swap_out (struct page *page) {
-	struct anon_page *anon_page = &page->anon;
+	// struct anon_page *anon_page = &page->anon;
+	disk_write(swap_disk, page->anon.swap_sec_no, page->va);
 }
 
 /* Destroy the anonymous page. PAGE will be freed by the caller. */
 static void
 anon_destroy (struct page *page) {
 	struct anon_page *anon_page = &page->anon;
+	hash_delete(&thread_current()->spt.hash, &page->elem);
 }

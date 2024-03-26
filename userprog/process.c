@@ -304,15 +304,15 @@ static void
 process_cleanup (void) {
 	struct thread *curr = thread_current ();
 
-	if (curr->exe_file) {
-		// 수정 방지를 위해 열어둔 파일 닫기
-		file_allow_write(curr->exe_file);
-		file_close(curr->exe_file);
-	}
-
 #ifdef VM
 	supplemental_page_table_kill (&curr->spt);
 #endif
+
+	if (curr->exe_file) {
+		// 수정 방지를 위해 열어둔 파일 닫기
+		// file_allow_write(curr->exe_file);
+		file_close(curr->exe_file);
+	}
 
 	uint64_t *pml4;
 	/* Destroy the current process's page directory and switch back
@@ -402,6 +402,19 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes,
 		bool writable);
 
+bool print_each_pte (uint64_t *pte, void *va, void *aux) {
+	printf(" %12p | %12p \n", pte, va); ////////////
+}
+
+void print_pml4(uint64_t *pml4) {
+	printf("============ PML4 ===========\n");
+	printf("    PTE PA    |      KVA     \n");
+	pml4_for_each (pml4, print_each_pte, NULL);
+	printf("=============================\n");
+}
+
+
+
 /* Loads an ELF executable from FILE_NAME into the current thread.
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
@@ -415,11 +428,17 @@ load (const char *file_name, struct intr_frame *if_) {
 	bool success = false;
 	int i;
 
+	// print_pml4(base_pml4); ///////////////////
+
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
 		goto done;
 	process_activate (thread_current ());
+
+	// print_pml4(t->pml4); ///////////////////
+
+	// void *tt = malloc(8); ////////////////
 
 	// P2
 	// file_name에서 파일 이름을 제외한 인자를 모두 끊기
@@ -429,6 +448,8 @@ load (const char *file_name, struct intr_frame *if_) {
 	}
 	char old_c = *p;
 	*p = '\0';
+
+	// printf("[DBG] load(): file_name = %s (at %p)\n", file_name, file_name); //////////
 
 	/* Open executable file. */
 	file = filesys_open (file_name);
@@ -740,12 +761,76 @@ install_page (void *upage, void *kpage, bool writable) {
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
 
-static bool
-lazy_load_segment (struct page *page, void *aux) {
-	/* TODO: Load the segment from the file */
-	/* TODO: This called when the first page fault occurs on address VA. */
-	/* TODO: VA is available when calling this function. */
-}
+// struct load_seg_args {
+// 	struct file *file;
+// 	off_t ofs;
+// 	uint32_t page_read_bytes;
+// 	uint32_t page_zero_bytes;
+// 	bool writable;
+// };
+
+
+// vm/file.c의 file_page_lazy_load와 병합
+// static bool
+// lazy_load_segment (struct page *page, void *aux) {
+// 	/* TODO: Load the segment from the file */
+// 	/* TODO: This called when the first page fault occurs on address VA. */
+// 	/* TODO: VA is available when calling this function. */
+// 	// printf("[DBG] lazy_load_segment(): begin\n"); //////////////////////////////////
+// 	struct file_page_args *fpargs = (struct file_page_args*) aux;
+// 	struct file *file = fpargs->file;
+// 	off_t ofs = fpargs->ofs;
+// 	uint32_t page_read_bytes = fpargs->page_read_bytes;
+// 	uint32_t page_zero_bytes = fpargs->page_zero_bytes;
+
+// 	// printf("[DBG] fpargs at %p\n", fpargs); //////////////////////////////////
+// 	// printf(" file at %p, ofs = %d, read b = %d, zero b = %d\n", file, ofs, page_read_bytes, page_zero_bytes); ///////
+// 	// bool writable = fpargs->writable;
+
+// 	ASSERT (page_read_bytes + page_zero_bytes == PGSIZE);
+// 	ASSERT (ofs % PGSIZE == 0);
+
+// 	file_seek (file, ofs);
+// 	/* Do calculate how to fill this page.
+// 		* We will read PAGE_READ_BYTES bytes from FILE
+// 		* and zero the final PAGE_ZERO_BYTES bytes. */
+
+// 	/* Get a page of memory. */
+// 	uint8_t *kpage = page->frame->kva;
+// 	// printf("[DBG] kpage at %p\n", kpage); //////////////////////////////////
+// 	ASSERT(kpage != NULL);
+
+// 	/* Load this page. */
+	
+// 	if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes) {
+// 		printf("[DBG] lazy_load_segment(): file_read failed!\n"); /////////////////
+// 		return false;
+// 	}
+// 	memset (kpage + page_read_bytes, 0, page_zero_bytes);
+
+// 	/////////////////////////////////////////
+// 	// if (page->va > 0x600000) {
+// 	// 	char *p = kpage;
+// 	// 	while (p < kpage + PGSIZE) {
+// 	// 		while (*p != '\0') {
+// 	// 			p++;
+// 	// 		}
+// 	// 		*p = ' ';
+// 	// 	}
+// 	// 	p--;
+// 	// 	*p = '\0';
+
+// 	// 	printf("DUMP segment (va = %p, kva = %p)\n", page->va, kpage);
+// 	// 	printf("%s", kpage);
+// 	// 	printf("\n");
+// 	// }
+// 	/////////////////////////////////////////
+
+
+
+// 	free(fpargs); // file_backed_initializer와 lazy_load_segment에서 사용이 모두 끝남
+// 	return true;
+// }
 
 /* Loads a segment starting at offset OFS in FILE at address
  * UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
@@ -768,6 +853,10 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 	ASSERT (pg_ofs (upage) == 0);
 	ASSERT (ofs % PGSIZE == 0);
 
+	// printf("[DBG] load_segment(): start\n"); ////////////////////////////////
+	// printf("file at %p, ofs: %d, upage at %p, read_bytes: %d, zero_bytes: %d, writable: %d\n",
+	// 		file, ofs, upage, read_bytes, zero_bytes, writable); ////////////////////////
+
 	while (read_bytes > 0 || zero_bytes > 0) {
 		/* Do calculate how to fill this page.
 		 * We will read PAGE_READ_BYTES bytes from FILE
@@ -776,15 +865,34 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		void *aux = NULL;
-		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
-					writable, lazy_load_segment, aux))
+		// void *aux = NULL;
+		struct file_page_args *fpargs = malloc(sizeof(*fpargs));
+		fpargs->file = file;
+		fpargs->ofs = ofs;
+		fpargs->page_read_bytes = page_read_bytes;
+		fpargs->page_zero_bytes = page_zero_bytes;
+		fpargs->writable = writable;
+		
+		// if (!vm_alloc_page_with_initializer (VM_FILE, upage,
+		// 			writable, lazy_load_segment, fpargs))
+		if (!vm_alloc_page_with_initializer (VM_FILE, upage,
+					writable, file_page_lazy_load, fpargs))
+		{
+			printf("[DBG] load_segment(): vm_alloc_page_with_initializer failed!\n"); ///
 			return false;
+		}
+		// printf("[DBG] load_segment(): vm_alloc_page_with_initializer success\n"); ///
+
+			// return false;
+		// if (!vm_alloc_page_with_initializer (VM_ANON, upage,
+		// 			writable, lazy_load_segment, aux))
+		// 	return false;
 
 		/* Advance. */
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
 		upage += PGSIZE;
+		ofs += PGSIZE;
 	}
 	return true;
 }
@@ -792,14 +900,32 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a PAGE of stack at the USER_STACK. Return true on success. */
 static bool
 setup_stack (struct intr_frame *if_) {
-	bool success = false;
+	// bool success = false;
 	void *stack_bottom = (void *) (((uint8_t *) USER_STACK) - PGSIZE);
 
 	/* TODO: Map the stack on stack_bottom and claim the page immediately.
 	 * TODO: If success, set the rsp accordingly.
 	 * TODO: You should mark the page is stack. */
 	/* TODO: Your code goes here */
+	if (!vm_alloc_page(VM_ANON | VM_STACK, stack_bottom, true)) {
+		printf("[DBG] setup_stack(): vm_alloc_page() failed!\n"); //////
+		return false;
+	}
 
-	return success;
+	// printf("[DBG] setup_stack(): vm_alloc_page() success! printing spt\n"); ///////
+	// print_hash_table(&thread_current()->spt.hash); //////////////////////////////
+
+	// printf("STCK BTM: %p\n", stack_bottom); ///////////////////////
+	
+	if (!vm_claim_page(stack_bottom)) {
+		printf("[DBG] setup_stack(): vm_claim_page() failed!\n"); //////
+		return false;
+	}
+	if_->rsp = USER_STACK;
+
+	// printf("[DBG] setup_stack(): vm_claim_page() success! printing spt\n"); ///////
+	// print_hash_table(&thread_current()->spt.hash); //////////////////////////////
+
+	return true;
 }
 #endif /* VM */

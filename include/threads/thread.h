@@ -146,6 +146,7 @@ struct thread {
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
 	struct supplemental_page_table spt;
+	struct list mmap_list; // mmap으로 저장한 file 및 page 정보 (P3)
 #endif
 
 	/* Owned by thread.c. */
@@ -201,6 +202,7 @@ bool thread_priority_less(const struct list_elem *a,
 // P2
 struct thread *thread_get_by_id(tid_t tid);
 bool thread_dup_file_list(struct thread *old_t, struct thread *new_t);
+// struct fd_elem *thread_get_fd_elem(int fd); // P3
 void thread_clear_fd_page_list(struct thread *t);
 int thread_wait(tid_t child_tid);
 

@@ -770,6 +770,27 @@ bool thread_dup_file_list(struct thread *old_t, struct thread *new_t) {
 	return true;
 }
 
+// // P3
+// // fd_list에서 해당하는 fd_elem 반환
+// // userprog/syscall.c, vm/file.c에서 사용됨
+// struct fd_elem *thread_get_fd_elem(int fd) {
+// 	struct list *fd_list = &thread_current()->fd_list;
+// 	struct list_elem *e;
+// 	struct fd_elem *fde;
+
+// 	for (e = list_begin(fd_list); e != list_end(fd_list); e = list_next(e)) {
+// 		fde = list_entry(e, struct fd_elem, elem);
+// 		if (fde->fd == fd)
+// 			break;
+// 	}
+
+// 	if (e == list_end(fd_list)) { // fd에 해당하는 요소가 없음
+// 		return NULL;
+// 	}
+
+// 	return fde;
+// }
+
 // P2
 // 프로세스 종료 전에 fd_page_list를 모두 free
 void thread_clear_fd_page_list(struct thread *t) {
@@ -1026,6 +1047,8 @@ init_thread (struct thread *t, const char *name, int priority) {
 	// P2
 	sema_init(&t->wait_sema, 0);
 	sema_init(&t->reap_sema, 0);
+
+	list_init(&t->mmap_list); // P3
 
 	t->is_user = false; // user process 여부 저장 (P2)
 	

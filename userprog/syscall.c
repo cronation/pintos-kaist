@@ -17,6 +17,9 @@
 #include "userprog/process.h"
 #include <string.h>
 
+// P3
+#include "vm/vm.h"
+
 //P2
 #define PUTBUF_MAX 512 // stdout으로 putbuf할 때의 최대 바이트 수
 // 한 페이지 안에 들어갈 수 있는 file_elem 구조체의 최대 개수
@@ -42,6 +45,8 @@ static int write(int fd, const void *buffer, unsigned size);
 static void seek(int fd, unsigned position);
 static unsigned tell(int fd);
 static void close(int fd);
+static void *mmap(void *addr, size_t length, int writable, int fd, off_t offset); // P3
+static void munmap (void *addr); // P3
 static int dup2(int oldfd, int newfd); // P2-EX
 
 static bool fd_elem_fd_less(const struct list_elem *a,
@@ -132,7 +137,8 @@ syscall_handler (struct intr_frame *f) {
 			ret = (uint64_t) read(arg1, arg2, arg3);
 			lock_release(&file_lock);
 			break;
-		case SYS_WRITE: /* Write to a file. */\
+		case SYS_WRITE: /* Write to a file. */
+			// printf("[DBG] write syscall by {%s}, fd = %d, buffer at %p, size = %d\n", thread_current()->name, arg1, arg2, arg3); ////
 			lock_acquire(&file_lock);
 			ret = (uint64_t) write(arg1, arg2, arg3);
 			lock_release(&file_lock);
@@ -150,10 +156,10 @@ syscall_handler (struct intr_frame *f) {
 			break;
 		/* Project 3 and optionally project 4. */
 		case SYS_MMAP: /* Map a file into memory. */
-			printf("syscall_handler(): not implemented (rax = %d)\n", syscall_no);
+			ret = (uint64_t) mmap(arg1, arg2, arg3, arg4, arg5);
 			break;
 		case SYS_MUNMAP: /* Remove a memory mapping. */
-			printf("syscall_handler(): not implemented (rax = %d)\n", syscall_no);
+			munmap(arg1);
 			break;
 		/* Project 4 only. */
 		case SYS_CHDIR: /* Change the current directory. */
@@ -286,8 +292,17 @@ static int filesize(int fd) {
 }
 
 static int read(int fd, void *buffer, unsigned size) {
+	// printf("[DBG] read(%d, buffer at %p, %d(%x))\n", fd, buffer, size, size); //////////////////////////////
+	// print_hash_table(&thread_current()->spt.hash); /////////////////////////////////////
 	if (!is_valid_addr(buffer) || !is_valid_addr(buffer + size -1)) {
 		// buffer의 시작과 끝 주소를 확인
+		lock_release(&file_lock);
+		exit(-1);
+	}
+
+	if (!vm_get_addr_writable(buffer) ||
+		!vm_get_addr_writable(buffer + size -1)) {
+		// buffer가 쓰기 가능인지 확인
 		lock_release(&file_lock);
 		exit(-1);
 	}
@@ -395,6 +410,40 @@ static void close(int fd) {
 	fde->elem.prev = NULL; // fd_page 상에서 빈 블록임을 표시
 }
 
+// P3
+static void *mmap(void *addr, size_t length, int writable, int fd, off_t offset) {
+	// printf("[DBG] mmap start\n"); ////////////////////////////////////////////////
+	if (addr == NULL) {
+		return NULL;
+	}
+	if (addr >= KERN_BASE || addr + length -1 >= KERN_BASE) {
+		// addr의 시작과 끝 주소를 확인
+		// lock_release(&file_lock);
+		return NULL;
+	}
+
+	struct fd_elem *fde = get_fd_elem_in_list(fd);
+	if (fde == NULL) {
+		// fd에 해당하는 파일이 file_list에 없음
+		return NULL;
+	}
+
+	if (fde->std_no == -1) {
+		return do_mmap(addr, length, writable, fde->fe->file, offset);
+	} else {
+		return NULL;
+	}
+}
+
+static void munmap (void *addr) {
+	if (!is_valid_addr(addr)) {
+		// addr의 시작과 끝 주소를 확인
+		exit(-1);
+	}
+
+	do_munmap(addr);
+}
+
 // P2-EX
 static int dup2(int oldfd, int newfd) {
 	struct fd_elem *old_fde = get_fd_elem_in_list(oldfd);
@@ -458,15 +507,21 @@ static bool fd_elem_fd_less(const struct list_elem *a,
 }
 
 // 유효한 주소인지 확인
-static bool is_valid_addr(void *p) {
-	if (p == NULL || p >= KERN_BASE) {
-		return false;
-	} else if (pml4_get_page (thread_current()->pml4, p) == NULL) {
-		// 매핑되지 않은 주소
-		return false;
-	}
+// static bool is_valid_addr(void *p) {
+// 	if (p == NULL || p >= KERN_BASE) {
+// 		return false;
+// 	} else if (pml4_get_page (thread_current()->pml4, p) == NULL) {
+// 		// 매핑되지 않은 주소
+// 		return false;
+// 	}
 
-	return true;
+// 	return true;
+// }
+
+// P3
+// P2에서 만든 함수는 uninit 페이지에 대해 fault가 발생
+static bool is_valid_addr(void *p) {
+	return vm_get_addr_readable(p);
 }
 
 // file_elem 또는 fd_elem을 저장하기 위한 공간을 할당
@@ -525,6 +580,11 @@ static struct fd_elem *get_fd_elem_in_list(int fd) {
 
 	return fde;
 }
+
+// // file backed page에서 사용하기 위해 함수를 thread.c로 옮김 (P3)
+// static struct fd_elem *get_fd_elem_in_list(int fd) {
+// 	return thread_get_fd_elem(fd);
+// }
 
 static int add_file_in_list(struct file *file) {
 	struct list *fd_list = &thread_current()->fd_list;
