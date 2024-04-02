@@ -288,6 +288,23 @@ pml4_set_dirty (uint64_t *pml4, const void *vpage, bool dirty) {
 	}
 }
 
+// P3
+// pml4e_walk 호출 없이 바로 pte를 인자로 받는 함수
+void
+pml4_pte_set_dirty (uint64_t *pml4, uint64_t *pte, const void *vpage, bool dirty) {
+	ASSERT(pte != NULL);
+
+	if (pte) {
+		if (dirty)
+			*pte |= PTE_D;
+		else
+			*pte &= ~(uint32_t) PTE_D;
+
+		if (rcr3 () == vtop (pml4))
+			invlpg ((uint64_t) vpage);
+	}
+}
+
 /* Returns true if the PTE for virtual page VPAGE in PML4 has been
  * accessed recently, that is, between the time the PTE was
  * installed and the last time it was cleared.  Returns false if
@@ -308,6 +325,37 @@ pml4_set_accessed (uint64_t *pml4, const void *vpage, bool accessed) {
 			*pte |= PTE_A;
 		else
 			*pte &= ~(uint32_t) PTE_A;
+
+		if (rcr3 () == vtop (pml4))
+			invlpg ((uint64_t) vpage);
+	}
+}
+
+// P3
+// pml4e_walk 호출 없이 바로 pte를 인자로 받는 함수
+void
+pml4_pte_set_accessed (uint64_t *pml4, uint64_t *pte, const void *vpage, bool accessed) {
+	ASSERT(pte != NULL);
+	
+	if (pte) {
+		if (accessed)
+			*pte |= PTE_A;
+		else
+			*pte &= ~(uint32_t) PTE_A;
+
+		if (rcr3 () == vtop (pml4))
+			invlpg ((uint64_t) vpage);
+	}
+}
+
+void
+pml4_set_writable (uint64_t *pml4, const void *vpage, bool writable) {
+	uint64_t *pte = pml4e_walk (pml4, (uint64_t) vpage, false);
+	if (pte) {
+		if (writable)
+			*pte |= PTE_W;
+		else
+			*pte &= ~(uint32_t) PTE_W;
 
 		if (rcr3 () == vtop (pml4))
 			invlpg ((uint64_t) vpage);

@@ -23,6 +23,8 @@ filesys_init (bool format) {
 
 	inode_init ();
 
+	lock_init(&file_lock); // filesys.h에 선언 (P3)
+
 #ifdef EFILESYS
 	fat_init ();
 

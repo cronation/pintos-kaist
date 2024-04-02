@@ -3,6 +3,12 @@
 #include <stdbool.h>
 #include "threads/palloc.h"
 
+// P3
+#include "threads/mmu.h"
+#include "threads/vaddr.h"
+#include <string.h> // memcpy, memset
+#include "threads/init.h" // base_pml4 확인용 (P3)
+
 enum vm_type {
 	/* page not initialized */
 	VM_UNINIT = 0,
@@ -27,6 +33,10 @@ enum vm_type {
 #include "vm/uninit.h"
 #include "vm/anon.h"
 #include "vm/file.h"
+// P3
+#include <hash.h> // supplemental page table 자료구조
+#include <list.h> // frame table 자료구조
+
 #ifdef EFILESYS
 #include "filesys/page_cache.h"
 #endif
@@ -46,6 +56,10 @@ struct page {
 	struct frame *frame;   /* Back reference for frame */
 
 	/* Your implementation */
+	bool writable;
+	// copy-on-write (P3-EX)
+	struct list share_list; // 페이지를 공유중인 spt의 리스트
+	int share_cnt;
 
 	/* Per-type data are binded into the union.
 	 * Each function automatically detects the current union */
@@ -59,10 +73,21 @@ struct page {
 	};
 };
 
+// share시에는 같은 페이지가 여러 hash table에 삽입되므로, 개별 구조체를 만들어 삽입
+struct page_elem {
+	struct page *page;
+	struct hash_elem elem;
+};
+
+
+struct list frame_list; // 물리 메모리에 할당된 frame의 리스트
+
 /* The representation of "frame" */
 struct frame {
 	void *kva;
 	struct page *page;
+	uint64_t *kpte; // pml4와 연결 (kernel pml4)
+	struct list_elem elem; // frame list에 넣기 위한 elem
 };
 
 /* The function table for page operations.
@@ -85,6 +110,38 @@ struct page_operations {
  * We don't want to force you to obey any specific design for this struct.
  * All designs up to you for this. */
 struct supplemental_page_table {
+	struct hash hash;
+	// struct list mmap_list;
+	struct hash mmap_hash;
+	uint64_t *pml4; // spt에 대응되는 pml4를 저장
+};
+
+// 페이지의 share_list에 spt의 주소를 저장할 구조체
+struct spt_elem {
+	struct supplemental_page_table *spt;
+	struct list_elem elem;
+};
+
+// mmap중인 file을 관리하기 위한 구조체
+struct mmap_elem {
+	struct hash_elem elem;
+	struct file *file;
+	void *addr;
+	int pg_cnt;
+};
+
+// uninit page의 aux에 저장되는 구조체
+// file backed page의 initialize, swap in에 필요한 정보
+// uninit의 aux에 저장되어있다가, file page로 변할 때 정보가 복사됨
+struct uninit_page_args {
+	// file page lazy load, lazy load segment용
+	struct file *file; // anon page initialize시에만 사용
+	void *addr; // file page initialize, swap in/out시에만 사용
+	off_t ofs;
+	uint32_t page_read_bytes;
+	uint32_t page_zero_bytes;
+	// anon page용
+	bool is_stack;
 };
 
 #include "threads/thread.h"
@@ -108,5 +165,12 @@ bool vm_alloc_page_with_initializer (enum vm_type type, void *upage,
 void vm_dealloc_page (struct page *page);
 bool vm_claim_page (void *va);
 enum vm_type page_get_type (struct page *page);
+
+// P3
+bool vm_get_page_writable(struct page *page);
+bool vm_get_addr_writable(void *va);
+bool vm_get_addr_readable(void *va);
+
+void print_spt(); ///////////////////////////////////////// DEBUG
 
 #endif  /* VM_VM_H */

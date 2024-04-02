@@ -6,6 +6,8 @@
 #include "threads/thread.h"
 #include "intrinsic.h"
 
+#include "userprog/syscall.h" // P2
+
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
@@ -143,11 +145,21 @@ page_fault (struct intr_frame *f) {
 #ifdef VM
 	/* For project 3 and later. */
 	if (vm_try_handle_fault (f, fault_addr, user, write, not_present))
+		// return;
+	{
+		// printf("[DBG] page_fault(): recovered from fault, print spt\n"); ////////////
+		// print_hash_table(&thread_current()->spt.hash); //////////////////////////////
 		return;
+	}
+	// printf("[DBG] could not recover form fault\n"); //////////////////////////////
 #endif
 
 	/* Count page faults. */
 	page_fault_cnt++;
+
+	// kill page fault (P2)
+	if (user)
+		syscall_terminate();
 
 	/* If the fault is true fault, show info and exit. */
 	printf ("Page fault at %p: %s error %s page in %s context.\n",
