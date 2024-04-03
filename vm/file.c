@@ -56,6 +56,20 @@ file_backed_initializer (struct page *page, enum vm_type type, void *kva) {
 	return true;
 }
 
+#define NUM_PER_LINE 32 // DEBUG
+// DEBUG
+static void page_dump(struct page *page, int bytes) {
+	unsigned char *p = page->va;
+	printf("[DBG] dumping page at va = %p", page->va);
+	for (int i = 0; i < bytes; i++) {
+		if (i % NUM_PER_LINE == 0) {
+			printf("\n{%s} #%3d | ", thread_current()->name, i / NUM_PER_LINE);
+		}
+		printf("%2d", p[i]);
+	}
+	printf("\n[DBG] dump done\n");
+}
+
 // 필요 시 파일에 write-back
 void file_backed_write_back(struct page *page, struct file *file) {
 	ASSERT(VM_TYPE(page->operations->type) == VM_FILE); ///////////////////////////////
@@ -75,9 +89,14 @@ void file_backed_write_back(struct page *page, struct file *file) {
 		// 	page->file.file, page->va, page->file.page_read_bytes); ///////////////
 		// printf("[DBG] offset = %d, zero bytes = %d\n", page->file.ofs, page->file.page_zero_bytes); ////
 
+		// page_dump(page); /////////////////
+
 		// lock_acquire(&file_lock);
 		int bytes_written = file_write(file, page->frame->kva, page->file.page_read_bytes); // destory는 pml4 삭제 후 호출되므로 kva로 삭제
 		// lock_release(&file_lock);
+		// printf("[DBG] file_backed_write_back(): {%s} wrote %d bytes\n", thread_current()->name, bytes_written); ////////////
+		// printf("[DBG] dumping first 100 bytes\n"); ///////////
+		// page_dump(page, 100); /////////////////
 
 		if (bytes_written != page->file.page_read_bytes) {
 			printf("[DBG] file_backed_write_back(): error while writting back... (bytes to write: %d, actual bytes: %d)\n", page->file.page_read_bytes, bytes_written); /////
@@ -225,6 +244,8 @@ do_mmap (void *addr, size_t length, int writable,
 
 	int pg_cnt = (length -1) / PGSIZE +1;
 
+	// printf("[DBG] do_mmap(): pg_cnt = %d\n", pg_cnt); ///////////////////////
+
 	for (int i = 0; i < pg_cnt; i++) {
 		if (spt_find_page(&thread_current()->spt, addr + PGSIZE * i)) {
 			// 할당될 페이지가 다른 페이지와 겹치면 실패
@@ -319,6 +340,7 @@ do_munmap (void *addr) {
 		ASSERT(page != NULL); ////////////////////////////////////////
 
 		if (page->frame) {
+			// printf("[DBG] do_munmap(): calling write-back\n"); ////////////////////////
 			file_backed_write_back(page, me->file);
 		}
 		spt_remove_page(&thread_current()->spt, page);

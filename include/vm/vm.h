@@ -81,6 +81,9 @@ struct page_elem {
 
 
 struct list frame_list; // 물리 메모리에 할당된 frame의 리스트
+struct frame frame_nil; // sentinel용 (LRU, Clock일 때 사용)
+// vm_handle_wp, vm_try_handle_fault, supplemental_page_table_kill에서 사용
+struct lock frame_list_lock;
 
 /* The representation of "frame" */
 struct frame {

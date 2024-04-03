@@ -294,9 +294,9 @@ process_exit (void) {
 		printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
 	}
 
-	sema_up(&thread_current()->wait_sema); // 대기중인 부모를 깨움
 	thread_clear_fd_page_list(curr);
 	process_cleanup ();
+	sema_up(&thread_current()->wait_sema); // 대기중인 부모를 깨움
 	sema_down(&thread_current()->reap_sema); // 부모가 reap 할 때까지 대기
 }
 
