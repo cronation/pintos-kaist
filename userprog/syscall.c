@@ -22,8 +22,6 @@
 // 한 페이지 안에 들어갈 수 있는 file_elem 구조체의 최대 개수
 #define BLK_MAX ( (int) (PGSIZE / sizeof(struct file_elem) ) )
 
-// struct lock file_lock; // 파일 읽기/쓰기 lock
-
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
@@ -49,7 +47,7 @@ static int dup2(int oldfd, int newfd); // P2-EX
 static bool fd_elem_fd_less(const struct list_elem *a,
 	const struct list_elem *b, void *aux UNUSED);
 static bool is_valid_addr(void *p);
-static bool is_writable_addr(void *p);
+static bool is_writable_addr(void *p); // P3
 static void *get_new_block(void);
 static struct fd_elem *get_fd_elem_in_list(int fd);
 static int add_file_in_list(struct file *file);
@@ -247,12 +245,7 @@ static bool create(const char *file, unsigned initial_size) {
 		exit(-1);
 	}
 
-	bool result = filesys_create(file, initial_size);
-
-	// printf("[DBG] syscall create(): {%s} just created file {%s}\n", thread_current()->name, file); //////////////
-	return result;
-
-	// return filesys_create(file, initial_size);
+	return filesys_create(file, initial_size);
 }
 
 static bool remove(const char *file) {

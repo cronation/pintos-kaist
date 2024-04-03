@@ -192,7 +192,8 @@ __do_fork (void *aux) {
 
 	process_activate (current);
 #ifdef VM
-	current->spt.pml4 = current->pml4; // spt에 pml4를 연결 - vm.c supplemental_page_table_init() 참조
+	// spt에 pml4를 연결 - vm.c supplemental_page_table_init() 참조
+	current->spt.pml4 = current->pml4;
 	supplemental_page_table_init (&current->spt);
 	if (!supplemental_page_table_copy (&current->spt, &parent->spt))
 		goto error;
@@ -421,7 +422,8 @@ load (const char *file_name, struct intr_frame *if_) {
 	if (t->pml4 == NULL)
 		goto done;
 #ifdef VM
-	t->spt.pml4 = t->pml4; // spt에 pml4를 연결 - vm.c supplemental_page_table_init() 참조
+	// spt에 pml4를 연결 - vm.c supplemental_page_table_init() 참조
+	t->spt.pml4 = t->pml4;
 #endif
 	process_activate (thread_current ());
 
@@ -435,7 +437,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	*p = '\0';
 
 	/* Open executable file. */
-	// printf("[DBG] load(): {%s} wants to open file {%s}\n", thread_current()->name, file_name); /////
 	lock_acquire(&file_lock);
 	file = filesys_open (file_name);
 	lock_release(&file_lock);
@@ -773,7 +774,7 @@ lazy_load_segment (struct page *page, void *aux) {
 
 	/* Load this page. */
 	if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes) {
-		printf("[DBG] lazy_load_segment(): file_read failed!\n"); /////////////////
+		printf("[DBG] lazy_load_segment(): file_read failed!\n");
 		return false;
 	}
 	memset (kpage + page_read_bytes, 0, page_zero_bytes);
@@ -824,7 +825,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
 					writable, lazy_load_segment, upargs))
 		{
-			printf("[DBG] load_segment(): vm_alloc_page_with_initializer failed!\n"); ///
+			printf("[DBG] load_segment(): vm_alloc_page_with_initializer failed!\n");
 			return false;
 		}
 
@@ -850,13 +851,14 @@ setup_stack (struct intr_frame *if_) {
 	struct uninit_page_args *upargs = malloc(sizeof(*upargs));
 	upargs->is_stack = true;
 
-	if (!vm_alloc_page_with_initializer(VM_ANON, stack_bottom, true, NULL, upargs)) {
-		printf("[DBG] setup_stack(): vm_alloc_page() failed!\n"); //////
+	if (!vm_alloc_page_with_initializer(VM_ANON, stack_bottom,
+										true, NULL, upargs)) {
+		printf("[DBG] setup_stack(): vm_alloc_page() failed!\n");
 		return false;
 	}
 	
 	if (!vm_claim_page(stack_bottom)) {
-		printf("[DBG] setup_stack(): vm_claim_page() failed!\n"); //////
+		printf("[DBG] setup_stack(): vm_claim_page() failed!\n");
 		return false;
 	}
 	if_->rsp = USER_STACK;

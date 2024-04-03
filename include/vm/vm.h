@@ -4,10 +4,11 @@
 #include "threads/palloc.h"
 
 // P3
-#include "threads/mmu.h"
-#include "threads/vaddr.h"
 #include <string.h> // memcpy, memset
-#include "threads/init.h" // base_pml4 확인용 (P3)
+#include "threads/synch.h" // P3
+#include "threads/vaddr.h"
+#include "threads/mmu.h"
+#include "threads/init.h" // base_pml4 확인용
 
 enum vm_type {
 	/* page not initialized */
@@ -82,8 +83,8 @@ struct page_elem {
 
 struct list frame_list; // 물리 메모리에 할당된 frame의 리스트
 struct frame frame_nil; // sentinel용 (LRU, Clock일 때 사용)
-// vm_handle_wp, vm_try_handle_fault, supplemental_page_table_kill에서 사용
 struct lock frame_list_lock;
+// lock: vm_handle_wp, vm_try_handle_fault, supplemental_page_table_kill에서 사용
 
 /* The representation of "frame" */
 struct frame {
@@ -114,7 +115,6 @@ struct page_operations {
  * All designs up to you for this. */
 struct supplemental_page_table {
 	struct hash hash;
-	// struct list mmap_list;
 	struct hash mmap_hash;
 	uint64_t *pml4; // spt에 대응되는 pml4를 저장
 };
@@ -125,7 +125,7 @@ struct spt_elem {
 	struct list_elem elem;
 };
 
-// mmap중인 file을 관리하기 위한 구조체
+// mmap중인 file을 관리하기 위한 구조체: thread.mmap_hash 안에 저장됨
 struct mmap_elem {
 	struct hash_elem elem;
 	struct file *file;
@@ -134,17 +134,15 @@ struct mmap_elem {
 };
 
 // uninit page의 aux에 저장되는 구조체
-// file backed page의 initialize, swap in에 필요한 정보
-// uninit의 aux에 저장되어있다가, file page로 변할 때 정보가 복사됨
+// initialize 또는 swap in에 필요한 정보
+// uninit의 aux에 저장되어있다가, anon/file page로 변할 때 정보가 복사됨
 struct uninit_page_args {
-	// file page lazy load, lazy load segment용
 	struct file *file; // anon page initialize시에만 사용
 	void *addr; // file page initialize, swap in/out시에만 사용
 	off_t ofs;
 	uint32_t page_read_bytes;
 	uint32_t page_zero_bytes;
-	// anon page용
-	bool is_stack;
+	bool is_stack; // anon page용
 };
 
 #include "threads/thread.h"
@@ -173,7 +171,5 @@ enum vm_type page_get_type (struct page *page);
 bool vm_get_page_writable(struct page *page);
 bool vm_get_addr_writable(void *va);
 bool vm_get_addr_readable(void *va);
-
-void print_spt(); ///////////////////////////////////////// DEBUG
 
 #endif  /* VM_VM_H */

@@ -145,13 +145,7 @@ page_fault (struct intr_frame *f) {
 #ifdef VM
 	/* For project 3 and later. */
 	if (vm_try_handle_fault (f, fault_addr, user, write, not_present))
-		// return;
-	{
-		// printf("[DBG] page_fault(): recovered from fault, print spt\n"); ////////////
-		// print_hash_table(&thread_current()->spt.hash); //////////////////////////////
 		return;
-	}
-	// printf("[DBG] could not recover form fault\n"); //////////////////////////////
 #endif
 
 	/* Count page faults. */

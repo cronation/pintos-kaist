@@ -2,10 +2,7 @@
 
 #include "vm/vm.h"
 #include "devices/disk.h"
-
-#include <bitmap.h> // swap disk table 자료구조
-
-// #include "threads/vaddr.h" // P3
+#include <bitmap.h> // swap disk table 자료구조 (P3)
 
 /* DO NOT MODIFY BELOW LINE */
 static struct disk *swap_disk;
@@ -31,10 +28,9 @@ struct bitmap *swap_bitmap; // swap disk에 할당된 sector의 비트맵
 /* Initialize the data for anonymous pages */
 void
 vm_anon_init (void) {
-	/* TODO: Set up the swap_disk. */
 	swap_disk = disk_get(1, 1);
 	// swap disk에 저장할 수 있는 페이지 수와 같은 크기의 비트맵 생성
-	swap_bitmap = bitmap_create(disk_size(swap_disk) * DISK_SECTOR_SIZE / PGSIZE);
+	swap_bitmap = bitmap_create(disk_size(swap_disk) * DISK_SECTOR_SIZE/PGSIZE);
 }
 
 /* Initialize the file mapping */
@@ -42,11 +38,11 @@ bool
 anon_initializer (struct page *page, enum vm_type type, void *kva) {
 	/* Set up the handler */
 	page->operations = &anon_ops;
-
 	vm_initializer *init = page->uninit.init;
 
 	// aux 읽기
-	struct uninit_page_args *upargs = (struct uninit_page_args *) page->uninit.aux;
+	struct uninit_page_args *upargs =
+								(struct uninit_page_args *) page->uninit.aux;
 	bool is_stack = upargs->is_stack;
 
 	// 옮겨적기
@@ -87,15 +83,9 @@ anon_swap_out (struct page *page) {
 static void
 anon_destroy (struct page *page) {
 	struct anon_page *anon_page = &page->anon;
-
-	// if (page->frame) {
-	// 	// frame list에서 제거
-	// 	list_remove(&page->frame->elem);
-	// 	free(page->frame);
-	// }
 }
 
-//////////////////////////////////////// HELPERS
+// Swap in/out helpers
 static void write_page_to_swap_disk(struct page *page) {
 	ASSERT(page->frame != NULL);
 
