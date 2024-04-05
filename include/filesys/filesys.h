@@ -12,7 +12,7 @@
 /* Disk used for file system. */
 extern struct disk *filesys_disk;
 
-struct lock file_lock; // process.c, syscall.c, vm/file.c에서 사용
+struct lock file_lock; // process.c, syscall.c에서 사용
 
 void filesys_init (bool format);
 void filesys_done (void);

@@ -35,7 +35,6 @@ vm_init (void) {
 		case EP_LLRU:
 			// lenient LRU: 마지막 eivction 이후 access되지 않은 프레임에 대해 FIFO
 			list_init(&frame_list);
-			list_push_back(&frame_list, &frame_nil.elem); // sentinel 용도
 			break;
 		case EP_CLCK:
 			// clock algorith (second wind)
@@ -199,12 +198,12 @@ vm_get_victim (void) {
 			break;
 		case EP_LLRU:
 			// lenient LRU: 마지막 eivction 이후 access되지 않은 프레임 중 FIFO
-			ASSERT(list_next(&frame_nil.elem) != list_end(&frame_list));
-			victim = list_entry(list_next(&frame_nil.elem), struct frame, elem);
+			ASSERT(!list_empty(&frame_list));
+			victim = list_entry(list_begin(&frame_list), struct frame, elem);
 			break;
 		case EP_CLCK:
 			// clock algorith (second wind)
-			ASSERT(list_next(&frame_nil.elem) != &frame_nil.elem);
+			ASSERT(list_next(&frame_nil.elem) != &frame_nil.elem); // 비었는지
 			victim = second_wind();
 			break;
 	}
@@ -248,8 +247,7 @@ vm_evict_frame (void) {
  * space.*/
 static struct frame *
 vm_get_frame (void) {
-	if (evict_policy == EP_LLRU &&
-		list_next(&frame_nil.elem) != list_end(&frame_list)) {
+	if (evict_policy == EP_LLRU && !list_empty(&frame_list)) {
 		// accessed인 프레임을 스택의 맨 뒤로 보냄 (lenient LRU)
 		push_accessed_frame_back();
 	}
@@ -670,10 +668,8 @@ static void insert_into_frame_list(struct frame *frame) {
 // Lenient LRU에서 사용
 // frame_list에서 accessed 비트가 표시된 페이지들을 뒤로 밀고 accessed를 제거
 static void push_accessed_frame_back(void) {
-	struct list_elem *nil_elem = &frame_nil.elem; // sentinel
-
-	list_remove(nil_elem);
-	list_push_back(&frame_list, nil_elem); // sentinel을 맨 뒤로 보내기
+	struct list_elem *nil_elem = &frame_nil.elem; // 마지막 원소 확인용 sentinel
+	list_push_back(&frame_list, nil_elem);
 
 	struct frame *frame;
 	void *va;
@@ -717,7 +713,6 @@ static void push_accessed_frame_back(void) {
 	}
 
 	list_remove(nil_elem);
-	list_push_front(&frame_list, nil_elem); // sentinel 다시 맨 앞으로
 }
 
 // clock algorithm에서 사용
